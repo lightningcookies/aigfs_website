@@ -1,4 +1,7 @@
 data/
 static/maps/
+venv/
 __pycache__/
 *.idx
+*.grib2
+.vscode/

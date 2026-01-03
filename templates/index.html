@@ -5,54 +5,19 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AIGFS Weather Model Viewer</title>
     <style>
-        body {
-            font-family: Arial, sans-serif;
-            margin: 0;
-            padding: 20px;
-            background-color: #f4f4f9;
-        }
-        .container {
-            max-width: 1200px;
-            margin: auto;
-            background: white;
-            padding: 20px;
-            border-radius: 8px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-        }
-        h1 {
-            text-align: center;
-            color: #333;
-        }
-        .controls {
-            display: flex;
-            justify-content: center;
-            gap: 20px;
-            margin-bottom: 20px;
-            flex-wrap: wrap;
-        }
-        .control-group {
-            display: flex;
-            flex-direction: column;
-        }
-        select {
-            padding: 8px;
-            border-radius: 4px;
-            border: 1px solid #ddd;
-        }
-        .map-display {
-            text-align: center;
-        }
-        #weather-map {
-            max-width: 100%;
-            height: auto;
-            border: 1px solid #ccc;
-            border-radius: 4px;
-        }
-        .info {
-            margin-top: 10px;
-            font-size: 0.9em;
-            color: #666;
-        }
+        body { font-family: Arial, sans-serif; margin: 0; padding: 20px; background-color: #f4f4f9; }
+        .container { max-width: 1200px; margin: auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        h1 { text-align: center; color: #333; }
+        .controls { display: flex; justify-content: center; gap: 15px; margin-bottom: 20px; flex-wrap: wrap; background: #eee; padding: 15px; border-radius: 5px; }
+        .control-group { display: flex; flex-direction: column; }
+        label { font-size: 0.8em; font-weight: bold; margin-bottom: 5px; color: #555; }
+        select { padding: 8px; border-radius: 4px; border: 1px solid #ddd; min-width: 120px; }
+        .map-display { text-align: center; margin-top: 20px; }
+        #weather-map { max-width: 100%; height: auto; border: 1px solid #ccc; border-radius: 4px; box-shadow: 0 4px 8px rgba(0,0,0,0.2); }
+        .info { margin-top: 15px; font-size: 1.1em; font-weight: bold; color: #333; }
+        .nav-buttons { margin-top: 10px; }
+        button { padding: 10px 20px; cursor: pointer; background: #007bff; color: white; border: none; border-radius: 4px; margin: 0 5px; }
+        button:hover { background: #0056b3; }
     </style>
 </head>
 <body>
@@ -60,6 +25,24 @@
         <h1>AIGFS Global Weather Model</h1>
         
         <div class="controls">
+            <div class="control-group">
+                <label for="date-select">Date:</label>
+                <select id="date-select" onchange="updateMap()">
+                    {% for d in dates %}
+                    <option value="{{ d }}">{{ d }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="control-group">
+                <label for="run-select">Model Run:</label>
+                <select id="run-select" onchange="updateMap()">
+                    {% for r in runs %}
+                    <option value="{{ r }}">{{ r }}Z</option>
+                    {% endfor %}
+                </select>
+            </div>
+
             <div class="control-group">
                 <label for="var-select">Variable:</label>
                 <select id="var-select" onchange="updateMap()">
@@ -77,35 +60,32 @@
                     {% endfor %}
                 </select>
             </div>
-
-            <div class="control-group">
-                <label for="run-select">Run:</label>
-                <select id="run-select" onchange="updateMap()">
-                    {% for r in runs %}
-                    <option value="{{ r }}">{{ r }}Z</option>
-                    {% endfor %}
-                </select>
-            </div>
         </div>
 
         <div class="map-display">
-            <img id="weather-map" src="" alt="Weather Map">
             <div class="info" id="map-info"></div>
+            <img id="weather-map" src="" alt="Weather Map">
+            
+            <div class="nav-buttons">
+                <button onclick="changeFhr(-6)">- 6h</button>
+                <button onclick="changeFhr(6)">+ 6h</button>
+            </div>
         </div>
     </div>
 
     <script>
         function updateMap() {
+            const date = document.getElementById('date-select').value;
+            const run = document.getElementById('run-select').value;
             const varName = document.getElementById('var-select').value;
             const fhr = document.getElementById('fhr-select').value;
-            const run = document.getElementById('run-select').value;
             
-            const filename = `aigfs_${run}_${fhr}_${varName}.png`;
+            const filename = `aigfs_${date}_{{ 'run' }}_${fhr}_${varName}.png`.replace("{{ 'run' }}", run);
             const mapImg = document.getElementById('weather-map');
             const mapInfo = document.getElementById('map-info');
             
             mapImg.src = `/static/maps/${filename}`;
-            mapInfo.innerText = `Displaying: ${varName.upper()} | Run: ${run}Z | Forecast: +${fhr}h`;
+            mapInfo.innerText = `${varName.upper()} | Run: ${date} ${run}Z | Forecast: +${fhr}h`;
             
             mapImg.onerror = function() {
                 this.src = '';
@@ -114,9 +94,17 @@
             };
         }
 
+        function changeFhr(delta) {
+            const select = document.getElementById('fhr-select');
+            let newIndex = select.selectedIndex + (delta / 6);
+            if (newIndex >= 0 && newIndex < select.length) {
+                select.selectedIndex = newIndex;
+                updateMap();
+            }
+        }
+
         // Initialize map on load
         window.onload = updateMap;
     </script>
 </body>
 </html>
-

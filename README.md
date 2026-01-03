@@ -17,9 +17,16 @@ sudo apt-get install libeccodes-dev
 
 ### Python Dependencies
 
-Install the required Python packages:
+It is highly recommended (and often required on modern Linux) to use a virtual environment:
 
 ```bash
+# Create the environment
+python3 -m venv venv
+
+# Activate it
+source venv/bin/activate
+
+# Install the required Python packages
 pip install -r requirements.txt
 ```
 

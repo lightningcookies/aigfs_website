@@ -3,42 +3,38 @@ import os
 
 app = Flask(__name__)
 
-# Route for the main page
 @app.route('/')
 def index():
-    # Get list of available maps to send to frontend
     maps_dir = os.path.join('static', 'maps')
     if not os.path.exists(maps_dir):
         return "No maps generated yet. Please run the backend scripts first."
     
     files = os.listdir(maps_dir)
-    # Filter and sort files (example: aigfs_00_000_t2m.png)
-    # We can extract run, fhr, and variable from filenames
     map_data = []
     for f in files:
         if f.endswith('.png'):
+            # New format: aigfs_20260103_00_000_t2m.png
             parts = f.replace('.png', '').split('_')
-            if len(parts) == 4:
+            if len(parts) == 5:
                 map_data.append({
                     'filename': f,
-                    'run': parts[1],
-                    'fhr': parts[2],
-                    'var': parts[3]
+                    'date': parts[1],
+                    'run': parts[2],
+                    'fhr': parts[3],
+                    'var': parts[4]
                 })
     
-    # Get unique runs, fhrs, and vars for selectors
+    # Sort and get unique values
+    dates = sorted(list(set(m['date'] for m in map_data)), reverse=True)
     runs = sorted(list(set(m['run'] for m in map_data)))
     fhrs = sorted(list(set(m['fhr'] for m in map_data)))
     vars_list = sorted(list(set(m['var'] for m in map_data)))
     
-    return render_template('index.html', runs=runs, fhrs=fhrs, vars=vars_list, map_data=map_data)
+    return render_template('index.html', dates=dates, runs=runs, fhrs=fhrs, vars=vars_list, map_data=map_data)
 
-# Route to serve static files (maps)
 @app.route('/static/maps/<path:filename>')
 def serve_map(filename):
     return send_from_directory('static/maps', filename)
 
 if __name__ == '__main__':
-    # Listen on all interfaces so it's accessible on the local network
     app.run(host='0.0.0.0', port=5000, debug=True)
-
