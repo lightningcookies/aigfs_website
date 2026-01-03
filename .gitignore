@@ -1,0 +1,4 @@
+data/
+static/maps/
+__pycache__/
+*.idx

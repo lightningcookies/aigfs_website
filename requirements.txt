@@ -1,0 +1,9 @@
+requests
+xarray
+cfgrib
+numpy
+matplotlib
+cartopy
+beautifulsoup4
+flask
+
