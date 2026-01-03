@@ -11,10 +11,18 @@ def process_grib_file(file_path, output_dir, date_str=None):
     Processes a single AIGFS GRIB2 file and generates maps for specified variables.
     """
     if not os.path.exists(file_path):
+        print(f"File not found: {file_path}")
+        return
+
+    # Check if cfgrib is actually available
+    try:
+        import cfgrib
+    except ImportError:
+        print("CRITICAL ERROR: 'cfgrib' is not installed or 'eccodes' library is missing.")
+        print("Try: sudo apt install libeccodes-dev && pip install cfgrib")
         return
 
     filename = os.path.basename(file_path)
-    # aigfs.t00z.sfc.f000.grib2
     parts = filename.split('.')
     if len(parts) < 4:
         return
@@ -24,10 +32,7 @@ def process_grib_file(file_path, output_dir, date_str=None):
     
     if not date_str:
         parent_dir = os.path.basename(os.path.dirname(file_path))
-        if '_' in parent_dir:
-            date_str = parent_dir.split('_')[0]
-        else:
-            date_str = datetime.now().strftime("%Y%m%d")
+        date_str = parent_dir.split('_')[0] if '_' in parent_dir else "unknown"
 
     variables = {
         't2m': {'typeOfLevel': 'heightAboveGround', 'level': 2},
@@ -43,6 +48,8 @@ def process_grib_file(file_path, output_dir, date_str=None):
         'prmsl': 'MSL Pressure'
     }
 
+    print(f"--- Processing {filename} ---")
+
     for var_key, filter_keys in variables.items():
         out_filename = f"aigfs_{date_str}_{run}_{fhr}_{var_key}.png"
         out_path = os.path.join(output_dir, out_filename)
@@ -51,7 +58,7 @@ def process_grib_file(file_path, output_dir, date_str=None):
             continue
 
         try:
-            # cfgrib can be noisy, we want to know if it actually fails
+            # Attempt to open dataset
             ds = xr.open_dataset(file_path, engine='cfgrib', 
                                 backend_kwargs={'filter_by_keys': filter_keys})
             
@@ -60,7 +67,7 @@ def process_grib_file(file_path, output_dir, date_str=None):
                 ds.close()
                 continue
 
-            print(f"Generating map: {out_filename}")
+            print(f"  > Creating map: {out_filename}")
             data = ds[actual_var]
             label = var_labels[var_key]
             
@@ -89,16 +96,13 @@ def process_grib_file(file_path, output_dir, date_str=None):
             ds.close()
 
         except Exception as e:
-            # Only print if it's not a common filtering issue
             if "filter_by_keys" not in str(e):
-                print(f"Error processing {var_key} in {filename}: {e}")
+                print(f"  ! Error on {var_key}: {e}")
 
 if __name__ == "__main__":
-    # This is just for manual testing
     data_dir = os.path.join("data")
     output_dir = os.path.join("static", "maps")
     os.makedirs(output_dir, exist_ok=True)
-
     for root, dirs, files in os.walk(data_dir):
         for f in sorted(files):
             if f.endswith('.grib2'):
