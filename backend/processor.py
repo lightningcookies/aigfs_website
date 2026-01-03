@@ -14,20 +14,21 @@ def process_grib_file(file_path, output_dir, date_str=None):
         return
 
     filename = os.path.basename(file_path)
+    # aigfs.t00z.sfc.f000.grib2
     parts = filename.split('.')
+    if len(parts) < 4:
+        return
+        
     run = parts[1][1:3]
     fhr = parts[3][1:]
     
-    # Use provided date or try to extract from path
     if not date_str:
-        # data/20260103_00/aigfs.t00z.sfc.f000.grib2
         parent_dir = os.path.basename(os.path.dirname(file_path))
         if '_' in parent_dir:
             date_str = parent_dir.split('_')[0]
         else:
-            date_str = "unknown"
+            date_str = datetime.now().strftime("%Y%m%d")
 
-    # Define variables to extract
     variables = {
         't2m': {'typeOfLevel': 'heightAboveGround', 'level': 2},
         'u10': {'typeOfLevel': 'heightAboveGround', 'level': 10, 'shortName': 'u10'},
@@ -43,7 +44,6 @@ def process_grib_file(file_path, output_dir, date_str=None):
     }
 
     for var_key, filter_keys in variables.items():
-        # Unique identifier for this map
         out_filename = f"aigfs_{date_str}_{run}_{fhr}_{var_key}.png"
         out_path = os.path.join(output_dir, out_filename)
         
@@ -51,6 +51,7 @@ def process_grib_file(file_path, output_dir, date_str=None):
             continue
 
         try:
+            # cfgrib can be noisy, we want to know if it actually fails
             ds = xr.open_dataset(file_path, engine='cfgrib', 
                                 backend_kwargs={'filter_by_keys': filter_keys})
             
@@ -88,15 +89,17 @@ def process_grib_file(file_path, output_dir, date_str=None):
             ds.close()
 
         except Exception as e:
-            # Silence expected errors when variable isn't in a specific file
-            pass
+            # Only print if it's not a common filtering issue
+            if "filter_by_keys" not in str(e):
+                print(f"Error processing {var_key} in {filename}: {e}")
 
 if __name__ == "__main__":
-    data_dir = os.path.join("data", "20260103_00")
+    # This is just for manual testing
+    data_dir = os.path.join("data")
     output_dir = os.path.join("static", "maps")
     os.makedirs(output_dir, exist_ok=True)
 
-    if os.path.exists(data_dir):
-        files = sorted([f for f in os.listdir(data_dir) if f.endswith('.grib2')])
-        for f in files:
-            process_grib_file(os.path.join(data_dir, f), output_dir)
+    for root, dirs, files in os.walk(data_dir):
+        for f in sorted(files):
+            if f.endswith('.grib2'):
+                process_grib_file(os.path.join(root, f), output_dir)

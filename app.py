@@ -7,14 +7,14 @@ app = Flask(__name__)
 def index():
     maps_dir = os.path.join('static', 'maps')
     if not os.path.exists(maps_dir):
-        return "No maps generated yet. Please run the backend scripts first."
+        return "No maps generated yet. Please run: python run_all.py"
     
     files = os.listdir(maps_dir)
     map_data = []
     for f in files:
         if f.endswith('.png'):
-            # New format: aigfs_20260103_00_000_t2m.png
             parts = f.replace('.png', '').split('_')
+            # Handle both old (4 parts) and new (5 parts) formats
             if len(parts) == 5:
                 map_data.append({
                     'filename': f,
@@ -23,7 +23,18 @@ def index():
                     'fhr': parts[3],
                     'var': parts[4]
                 })
+            elif len(parts) == 4:
+                map_data.append({
+                    'filename': f,
+                    'date': '20260103', # Default for old files
+                    'run': parts[1],
+                    'fhr': parts[2],
+                    'var': parts[3]
+                })
     
+    if not map_data:
+        return "No valid map images found. Please run: python run_all.py"
+
     # Sort and get unique values
     dates = sorted(list(set(m['date'] for m in map_data)), reverse=True)
     runs = sorted(list(set(m['run'] for m in map_data)))

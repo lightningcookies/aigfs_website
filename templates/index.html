@@ -80,7 +80,9 @@
             const varName = document.getElementById('var-select').value;
             const fhr = document.getElementById('fhr-select').value;
             
-            const filename = `aigfs_${date}_{{ 'run' }}_${fhr}_${varName}.png`.replace("{{ 'run' }}", run);
+            // Try matching the 5-part filename first
+            let filename = `aigfs_${date}_${run}_${fhr}_${varName}.png`;
+            
             const mapImg = document.getElementById('weather-map');
             const mapInfo = document.getElementById('map-info');
             
@@ -88,9 +90,20 @@
             mapInfo.innerText = `${varName.upper()} | Run: ${date} ${run}Z | Forecast: +${fhr}h`;
             
             mapImg.onerror = function() {
-                this.src = '';
-                this.alt = "Image not found for this selection.";
-                mapInfo.innerText = "Data not available for this selection.";
+                // If 5-part fails, try 4-part (backward compatibility)
+                if (this.src.includes(`aigfs_${date}_`)) {
+                    let altFilename = `aigfs_${run}_${fhr}_${varName}.png`;
+                    this.src = `/static/maps/${altFilename}`;
+                    this.onerror = function() {
+                        this.src = '';
+                        this.alt = "Image not found for this selection.";
+                        mapInfo.innerText = "Data not available for this selection.";
+                    };
+                } else {
+                    this.src = '';
+                    this.alt = "Image not found for this selection.";
+                    mapInfo.innerText = "Data not available for this selection.";
+                }
             };
         }
 
@@ -103,7 +116,6 @@
             }
         }
 
-        // Initialize map on load
         window.onload = updateMap;
     </script>
 </body>
