@@ -5,8 +5,8 @@ After=network.target
 [Service]
 Type=simple
 User=lenovo1
-WorkingDirectory=/home/lenovo1/aigfs_website
-ExecStart=/home/lenovo1/aigfs_website/venv/bin/python backend/scraper.py
+WorkingDirectory=/home/lenovo1/Documents/aigfs/aigfs_website
+ExecStart=/home/lenovo1/Documents/aigfs/aigfs_website/venv/bin/python backend/scraper.py
 Restart=always
 RestartSec=60
 
