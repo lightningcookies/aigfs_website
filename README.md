@@ -32,29 +32,44 @@ pip install -r requirements.txt
 
 Note: If you have trouble installing `cartopy`, you may need additional system libraries like `libgeos-dev` and `libproj-dev`.
 
-## Usage
+## Usage (As Services)
 
-### 1. Download and Process Data
+The project is now designed to run as three separate background services.
 
-Run the main script to fetch the latest data and generate the maps. By default, it looks for the run specified in your request (20260103 00Z).
+### 1. Configure Services
 
-```bash
-python run_all.py
-```
-
-This will:
-- Download GRIB2 files into the `data/` directory.
-- Generate PNG map images into `static/maps/`.
-
-### 2. Start the Web Server
-
-Run the Flask application:
+The templates are located in the `services/` folder. Before installing, you must edit them to replace `{{USER}}` with your actual Linux username (e.g., `tayta`).
 
 ```bash
-python app.py
+# Example: Replace {{USER}} with your username
+sed -i 's/{{USER}}/your_username/g' services/*.service
 ```
 
-The website will be accessible on your local network at `http://<your-server-ip>:5000`.
+### 2. Install Services
+
+Copy the files to the Systemd directory and enable them:
+
+```bash
+sudo cp services/*.service /etc/systemd/system/
+sudo systemctl daemon-reload
+
+# Start the services
+sudo systemctl enable --now aigfs-downloader
+sudo systemctl enable --now aigfs-processor
+sudo systemctl enable --now aigfs-web
+```
+
+### 3. Monitoring
+
+You can check the logs of any service using `journalctl`:
+
+```bash
+journalctl -u aigfs-downloader -f
+```
+
+## Standardized Scales
+
+All maps now use a fixed color scale (VMIN/VMAX) to ensure consistency across different runs and forecast hours. These are centrally managed in `backend/processor.py`.
 
 ## Project Structure
 

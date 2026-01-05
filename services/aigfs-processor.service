@@ -1,0 +1,15 @@
+[Unit]
+Description=AIGFS Data Processor
+After=aigfs-downloader.service
+
+[Service]
+Type=simple
+User={{USER}}
+WorkingDirectory=/home/{{USER}}/aigfs_website
+ExecStart=/home/{{USER}}/aigfs_website/venv/bin/python backend/processor.py
+Restart=always
+RestartSec=60
+
+[Install]
+WantedBy=multi-user.target
+

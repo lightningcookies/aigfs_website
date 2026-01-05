@@ -1,5 +1,6 @@
 import os
 import requests
+import time
 from datetime import datetime, timedelta
 
 def download_aigfs_data(date_str, run, forecast_hours):
@@ -17,7 +18,6 @@ def download_aigfs_data(date_str, run, forecast_hours):
         target_path = os.path.join(download_dir, filename)
 
         if os.path.exists(target_path):
-            # Check if file is not empty (sometimes downloads fail)
             if os.path.getsize(target_path) > 1000:
                 continue
 
@@ -45,22 +45,32 @@ def get_latest_runs():
     """
     now = datetime.utcnow()
     runs = []
-    
-    # Check the last 4 possible run times
     for i in range(4):
         check_time = now - timedelta(hours=i*6)
-        # Round down to the nearest 6h run (0, 6, 12, 18)
         run_hour = (check_time.hour // 6) * 6
         date_str = check_time.strftime("%Y%m%d")
         run_str = f"{run_hour:02d}"
         runs.append((date_str, run_str))
-    
     return runs
 
+def run_scraper_service():
+    """
+    Infinite loop that checks for new AIGFS runs every hour.
+    """
+    print("--- AIGFS Downloader Service Started ---")
+    forecast_hours = [f"{h:03d}" for h in range(0, 390, 6)]
+
+    while True:
+        latest_runs = get_latest_runs()
+        print(f"\n[Run Check] {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        
+        for date_str, run_str in latest_runs:
+            print(f" Checking {date_str} {run_str}Z...")
+            download_aigfs_data(date_str, run_str, forecast_hours)
+        
+        # Sleep for 60 minutes before checking again
+        print("Scraper sleeping for 60 minutes...")
+        time.sleep(3600)
+
 if __name__ == "__main__":
-    # Test latest runs
-    latest = get_latest_runs()
-    print(f"Checking runs: {latest}")
-    hours = ["000", "006"] # Small test
-    for d, r in latest:
-        download_aigfs_data(d, r, hours)
+    run_scraper_service()
