@@ -4,12 +4,11 @@ After=network.target
 
 [Service]
 Type=simple
-User={{USER}}
-WorkingDirectory=/home/{{USER}}/aigfs_website
-ExecStart=/home/{{USER}}/aigfs_website/venv/bin/python backend/scraper.py
+User=lenovo1
+WorkingDirectory=/home/lenovo1/aigfs_website
+ExecStart=/home/lenovo1/aigfs_website/venv/bin/python backend/scraper.py
 Restart=always
 RestartSec=60
 
 [Install]
 WantedBy=multi-user.target
-

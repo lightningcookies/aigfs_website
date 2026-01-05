@@ -4,12 +4,11 @@ After=aigfs-processor.service
 
 [Service]
 Type=simple
-User={{USER}}
-WorkingDirectory=/home/{{USER}}/aigfs_website
-ExecStart=/home/{{USER}}/aigfs_website/venv/bin/python app.py
+User=lenovo1
+WorkingDirectory=/home/lenovo1/aigfs_website
+ExecStart=/home/lenovo1/aigfs_website/venv/bin/python app.py
 Restart=always
 RestartSec=10
 
 [Install]
 WantedBy=multi-user.target
-
