@@ -96,6 +96,13 @@ def process_grib_file(file_path, output_dir, date_str=None):
             continue
 
         try:
+            # Check if file is still being written to (size shouldn't change)
+            initial_size = os.path.getsize(file_path)
+            time.sleep(1)
+            if os.path.getsize(file_path) != initial_size:
+                print(f"  ! File {filename} is still being modified, skipping for now.")
+                return
+
             ds = xr.open_dataset(file_path, engine='cfgrib', 
                                 backend_kwargs={'filter_by_keys': config['filter']})
             
