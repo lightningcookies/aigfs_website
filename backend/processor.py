@@ -1,6 +1,7 @@
 import os
 import xarray as xr
 import matplotlib.pyplot as plt
+import matplotlib.colors as mcolors
 import cartopy.crs as ccrs
 import cartopy.feature as cfeature
 import numpy as np
@@ -9,15 +10,14 @@ from datetime import datetime
 
 # Processing settings
 CLEANUP_GRIB = False  # Set to True to delete GRIB2 files after processing (saves space)
-REPROCESS = False     # Set to True to overwrite existing maps
+REPROCESS = True      # Set to True to overwrite existing maps
 
 # Centralized configuration for standardized scales
 VAR_CONFIG = {
     't2m': {
         'label': 'Temperature (2m)',
         'cmap': 'RdYlBu_r',
-        'vmin': -30,
-        'vmax': 45,
+        'levels': np.arange(-40, 51, 5), # Discrete steps every 5 degrees
         'unit_conv': lambda x: x - 273.15,
         'unit_label': '°C',
         'filter': {'typeOfLevel': 'heightAboveGround', 'level': 2}
@@ -25,8 +25,7 @@ VAR_CONFIG = {
     'u10': {
         'label': 'U Wind (10m)',
         'cmap': 'viridis',
-        'vmin': -50,
-        'vmax': 50,
+        'levels': np.arange(-50, 51, 10),
         'unit_conv': lambda x: x,
         'unit_label': 'm/s',
         'filter': {'typeOfLevel': 'heightAboveGround', 'level': 10, 'shortName': 'u10'}
@@ -34,8 +33,7 @@ VAR_CONFIG = {
     'v10': {
         'label': 'V Wind (10m)',
         'cmap': 'viridis',
-        'vmin': -50,
-        'vmax': 50,
+        'levels': np.arange(-50, 51, 10),
         'unit_conv': lambda x: x,
         'unit_label': 'm/s',
         'filter': {'typeOfLevel': 'heightAboveGround', 'level': 10, 'shortName': 'v10'}
@@ -43,8 +41,7 @@ VAR_CONFIG = {
     'prmsl': {
         'label': 'MSL Pressure',
         'cmap': 'coolwarm',
-        'vmin': 970,
-        'vmax': 1040,
+        'levels': np.arange(960, 1051, 4), # Standard 4hPa intervals
         'unit_conv': lambda x: x / 100.0,
         'unit_label': 'hPa',
         'filter': {'shortName': 'prmsl'}
@@ -52,8 +49,8 @@ VAR_CONFIG = {
     'tp': {
         'label': 'Total Precipitation (6h)',
         'cmap': 'YlGnBu',
-        'vmin': 0,
-        'vmax': 50,
+        # NOAA-style discrete levels for rainfall (mm)
+        'levels': [0.1, 0.5, 1, 2, 5, 10, 15, 20, 25, 35, 50, 75, 100],
         'unit_conv': lambda x: x,
         'unit_label': 'mm',
         'filter': {'shortName': 'tp'}
@@ -96,11 +93,10 @@ def process_grib_file(file_path, output_dir, date_str=None):
             continue
 
         try:
-            # Check if file is still being written to (size shouldn't change)
+            # Check if file is still being written to
             initial_size = os.path.getsize(file_path)
-            time.sleep(1)
+            time.sleep(0.5)
             if os.path.getsize(file_path) != initial_size:
-                print(f"  ! File {filename} is still being modified, skipping for now.")
                 return
 
             ds = xr.open_dataset(file_path, engine='cfgrib', 
@@ -113,32 +109,33 @@ def process_grib_file(file_path, output_dir, date_str=None):
 
             print(f"  > Creating map: {out_filename}")
             data = ds[actual_var]
-            
-            # Apply unit conversion
             data = config['unit_conv'](data)
 
-            fig = plt.figure(figsize=(15, 8))
-            ax = plt.axes(projection=ccrs.PlateCarree())
-            ax.add_feature(cfeature.COASTLINE, linewidth=1)
-            ax.add_feature(cfeature.BORDERS, linestyle=':', linewidth=0.5)
-            ax.add_feature(cfeature.STATES, linestyle='--', linewidth=0.2, edgecolor='gray')
+            # Create a clean map without borders for Leaflet overlay
+            # We use PlateCarree which maps directly to Lat/Lon
+            fig = plt.figure(figsize=(20, 10), frameon=False)
+            ax = plt.axes([0, 0, 1, 1], projection=ccrs.PlateCarree())
+            ax.set_axis_off()
 
-            # Mask out zeros for precipitation
+            # Define discrete norm for the colormap
+            levels = config['levels']
+            norm = mcolors.BoundaryNorm(levels, ncolors=plt.get_cmap(config['cmap']).N, extend='both')
+
+            # Plot data
             if var_key == 'tp':
-                data = data.where(data > 0.1)
+                data = data.where(data >= 0.1) # Hide 0 precip
             
-            # Use fixed vmin and vmax for standardized scales
-            im = data.plot(ax=ax, transform=ccrs.PlateCarree(), 
-                           cmap=config['cmap'], 
-                           vmin=config['vmin'], 
-                           vmax=config['vmax'], 
-                           add_colorbar=False)
+            # Use 'pcolormesh' or 'contourf' for clean edges in Leaflet
+            im = data.plot.contourf(ax=ax, transform=ccrs.PlateCarree(), 
+                                  levels=levels, cmap=config['cmap'], norm=norm, 
+                                  add_colorbar=False, add_labels=False)
             
-            plt.colorbar(im, ax=ax, label=f"{config['label']} ({config['unit_label']})", 
-                        orientation='horizontal', pad=0.05, shrink=0.8)
-            plt.title(f"AIGFS {date_str} {run}z - Forecast Hour {fhr} - {config['label']}")
+            # Set extent to full global range to ensure PNG matches Leaflet expectations
+            ax.set_global()
             
-            plt.savefig(out_path, bbox_inches='tight', dpi=120)
+            # Save the PNG with NO padding/borders/background
+            # This is crucial for Leaflet overlays
+            plt.savefig(out_path, bbox_inches=0, pad_inches=0, transparent=True, dpi=150)
             plt.close(fig)
             ds.close()
 
@@ -161,29 +158,18 @@ def run_processor_service():
             for f in sorted(files):
                 if f.endswith('.grib2'):
                     grib_path = os.path.join(root, f)
-                    # Simple check: if all PNGs for this file exist, we might skip
-                    # but process_grib_file already does that check per variable.
                     process_grib_file(grib_path, output_dir)
                     processed_count += 1
                     
-                    # Optional Cleanup: Delete GRIB2 file after processing to save space
                     if CLEANUP_GRIB:
                         try:
                             os.remove(grib_path)
-                            print(f"  > Cleaned up {f}")
-                            # Also remove the .idx file created by cfgrib if it exists
                             idx_path = grib_path + ".idx"
                             if os.path.exists(idx_path):
                                 os.remove(idx_path)
-                        except Exception as e:
-                            print(f"  ! Cleanup failed for {f}: {e}")
+                        except: pass
         
-        if processed_count == 0:
-            # Nothing to do, sleep for 5 minutes
-            time.sleep(300)
-        else:
-            # Just processed some files, wait a bit before next scan
-            time.sleep(60)
+        time.sleep(60 if processed_count > 0 else 300)
 
 if __name__ == "__main__":
     run_processor_service()

@@ -3,109 +3,198 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AIGFS Weather Model Viewer</title>
+    <title>AIGFS Interactive Weather Viewer</title>
+    
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    
     <style>
-        body { font-family: Arial, sans-serif; margin: 0; padding: 20px; background-color: #f4f4f9; }
-        .container { max-width: 1200px; margin: auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
-        h1 { text-align: center; color: #333; }
-        .controls { display: flex; justify-content: center; gap: 15px; margin-bottom: 20px; flex-wrap: wrap; background: #eee; padding: 15px; border-radius: 5px; }
-        .control-group { display: flex; flex-direction: column; }
-        label { font-size: 0.8em; font-weight: bold; margin-bottom: 5px; color: #555; }
-        select { padding: 8px; border-radius: 4px; border: 1px solid #ddd; min-width: 120px; }
-        .map-display { text-align: center; margin-top: 20px; }
-        #weather-map { max-width: 100%; height: auto; border: 1px solid #ccc; border-radius: 4px; box-shadow: 0 4px 8px rgba(0,0,0,0.2); }
-        .info { margin-top: 15px; font-size: 1.1em; font-weight: bold; color: #333; }
-        .nav-buttons { margin-top: 10px; }
-        button { padding: 10px 20px; cursor: pointer; background: #007bff; color: white; border: none; border-radius: 4px; margin: 0 5px; }
-        button:hover { background: #0056b3; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; padding: 0; background-color: #1a1a1a; color: white; }
+        .header { background: #333; padding: 10px 20px; display: flex; align-items: center; justify-content: space-between; box-shadow: 0 2px 5px rgba(0,0,0,0.5); }
+        h1 { margin: 0; font-size: 1.2em; }
+        
+        .layout { display: flex; height: calc(100vh - 50px); }
+        
+        .sidebar { width: 300px; background: #222; padding: 20px; overflow-y: auto; box-shadow: 2px 0 5px rgba(0,0,0,0.3); }
+        .control-group { margin-bottom: 20px; }
+        label { display: block; font-size: 0.8em; font-weight: bold; margin-bottom: 5px; color: #aaa; text-transform: uppercase; }
+        select { width: 100%; padding: 10px; background: #333; color: white; border: 1px solid #444; border-radius: 4px; font-size: 1em; }
+        
+        #map { flex-grow: 1; background: #000; }
+        
+        .info-panel { position: absolute; bottom: 20px; right: 20px; background: rgba(0,0,0,0.8); padding: 15px; border-radius: 8px; border: 1px solid #444; z-index: 1000; pointer-events: none; }
+        .value-display { font-size: 2em; font-weight: bold; color: #00ffcc; }
+        .coords { font-size: 0.8em; color: #888; }
+        
+        .legend { margin-top: 20px; font-size: 0.8em; }
+        .nav-buttons { display: flex; gap: 10px; margin-top: 10px; }
+        button { flex: 1; padding: 10px; background: #444; color: white; border: none; border-radius: 4px; cursor: pointer; }
+        button:hover { background: #555; }
+        
+        /* Loading indicator */
+        #loader { display: none; margin-left: 10px; font-size: 0.8em; color: #00ffcc; }
     </style>
 </head>
 <body>
-    <div class="container">
-        <h1>AIGFS Global Weather Model</h1>
-        
-        <div class="controls">
+    <div class="header">
+        <h1>AIGFS Global Interactive <span id="loader">Updating...</span></h1>
+        <div id="status-text" style="font-size: 0.8em; color: #888;">Click map for values</div>
+    </div>
+
+    <div class="layout">
+        <div class="sidebar">
             <div class="control-group">
-                <label for="date-select">Date:</label>
+                <label for="date-select">Date</label>
                 <select id="date-select" onchange="updateMap()">
                     {% for d in dates %}
-                    <option value="{{ d }}">{{ d }}</option>
+                    <option value="{{ d.id }}">{{ d.label }}</option>
                     {% endfor %}
                 </select>
             </div>
 
             <div class="control-group">
-                <label for="run-select">Model Run:</label>
+                <label for="run-select">Model Run (MST)</label>
                 <select id="run-select" onchange="updateMap()">
                     {% for r in runs %}
-                    <option value="{{ r }}">{{ r }}Z</option>
+                    <option value="{{ r.id }}">{{ r.label }}</option>
                     {% endfor %}
                 </select>
             </div>
 
             <div class="control-group">
-                <label for="var-select">Variable:</label>
+                <label for="var-select">Variable</label>
                 <select id="var-select" onchange="updateMap()">
                     {% for v in vars %}
-                    <option value="{{ v }}">{{ v.upper() }}</option>
+                    <option value="{{ v.id }}">{{ v.label }}</option>
                     {% endfor %}
                 </select>
             </div>
-            
+
             <div class="control-group">
-                <label for="fhr-select">Forecast Hour:</label>
+                <label for="fhr-select">Forecast Hour</label>
                 <select id="fhr-select" onchange="updateMap()">
                     {% for f in fhrs %}
                     <option value="{{ f }}">F{{ f }}</option>
                     {% endfor %}
                 </select>
+                <div class="nav-buttons">
+                    <button onclick="changeFhr(-6)">- 6h</button>
+                    <button onclick="changeFhr(6)">+ 6h</button>
+                </div>
+            </div>
+
+            <div class="legend" id="map-legend">
+                <!-- Legend content can be dynamically added later -->
             </div>
         </div>
 
-        <div class="map-display">
-            <div class="info" id="map-info"></div>
-            <img id="weather-map" src="" alt="Weather Map">
-            
-            <div class="nav-buttons">
-                <button onclick="changeFhr(-6)">- 6h</button>
-                <button onclick="changeFhr(6)">+ 6h</button>
-            </div>
-        </div>
+        <div id="map"></div>
     </div>
 
+    <div class="info-panel" id="info-panel" style="display: none;">
+        <div class="coords" id="click-coords"></div>
+        <div class="value-display" id="click-value">--</div>
+        <div id="var-unit"></div>
+    </div>
+
+    <!-- Leaflet JS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    
     <script>
+        // Store display mappings from Python
+        const fhrLabels = {
+            {% for m in map_data %}
+            "{{ m.fhr }}": "{{ m.fhr_display }}",
+            {% endfor %}
+        };
+
+        // Initialize Leaflet Map
+        const map = L.map('map', {
+            center: [20, 0],
+            zoom: 3,
+            minZoom: 2,
+            maxZoom: 10,
+            backgroundColor: '#000'
+        });
+
+        // Base layer (Dark theme)
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+            attribution: '&copy; OpenStreetMap &copy; CARTO'
+        }).addTo(map);
+
+        let weatherOverlay = null;
+
         function updateMap() {
             const date = document.getElementById('date-select').value;
             const run = document.getElementById('run-select').value;
             const varName = document.getElementById('var-select').value;
             const fhr = document.getElementById('fhr-select').value;
             
-            // Try matching the 5-part filename first
-            let filename = `aigfs_${date}_${run}_${fhr}_${varName}.png`;
-            
-            const mapImg = document.getElementById('weather-map');
-            const mapInfo = document.getElementById('map-info');
-            
-            mapImg.src = `/static/maps/${filename}`;
-            mapInfo.innerText = `${varName.upper()} | Run: ${date} ${run}Z | Forecast: +${fhr}h`;
-            
-            mapImg.onerror = function() {
-                // If 5-part fails, try 4-part (backward compatibility)
-                if (this.src.includes(`aigfs_${date}_`)) {
-                    let altFilename = `aigfs_${run}_${fhr}_${varName}.png`;
-                    this.src = `/static/maps/${altFilename}`;
-                    this.onerror = function() {
-                        this.src = '';
-                        this.alt = "Image not found for this selection.";
-                        mapInfo.innerText = "Data not available for this selection.";
-                    };
-                } else {
-                    this.src = '';
-                    this.alt = "Image not found for this selection.";
-                    mapInfo.innerText = "Data not available for this selection.";
-                }
-            };
+            const filename = `aigfs_${date}_${run}_${fhr}_${varName}.png`;
+            const imageUrl = `/static/maps/${filename}`;
+            const imageBounds = [[-90, -180], [90, 180]];
+
+            document.getElementById('loader').style.display = 'inline';
+
+            // Remove existing overlay
+            if (weatherOverlay) {
+                map.removeLayer(weatherOverlay);
+            }
+
+            // Create new overlay
+            weatherOverlay = L.imageOverlay(imageUrl, imageBounds, {
+                opacity: 0.7,
+                interactive: false
+            }).addTo(map);
+
+            weatherOverlay.on('load', () => {
+                document.getElementById('loader').style.display = 'none';
+                // Update the FHR dropdown text to show the time
+                const fhrLabel = fhrLabels[fhr];
+                document.getElementById('status-text').innerText = `Valid: ${fhrLabel}`;
+            });
+
+            weatherOverlay.on('error', () => {
+                document.getElementById('loader').style.display = 'none';
+                console.error("Map image not found: " + filename);
+            });
         }
+
+        // Click for values
+        map.on('click', function(e) {
+            const lat = e.latlng.lat.toFixed(4);
+            const lon = e.latlng.lng.toFixed(4);
+            
+            const date = document.getElementById('date-select').value;
+            const run = document.getElementById('run-select').value;
+            const varName = document.getElementById('var-select').value;
+            const fhr = document.getElementById('fhr-select').value;
+
+            document.getElementById('info-panel').style.display = 'block';
+            document.getElementById('click-coords').innerText = `${lat}, ${lon}`;
+            document.getElementById('click-value').innerText = "Loading...";
+
+            fetch(`/api/value?date=${date}&run=${run}&fhr=${fhr}&var=${varName}&lat=${lat}&lon=${lon}`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.error) {
+                        document.getElementById('click-value').innerText = "N/A";
+                    } else {
+                        const units = {
+                            't2m': '°C',
+                            'tp': 'mm',
+                            'prmsl': 'hPa',
+                            'u10': 'm/s',
+                            'v10': 'm/s'
+                        };
+                        document.getElementById('click-value').innerText = data.value;
+                        document.getElementById('var-unit').innerText = units[varName] || "";
+                    }
+                })
+                .catch(err => {
+                    document.getElementById('click-value').innerText = "Error";
+                });
+        });
 
         function changeFhr(delta) {
             const select = document.getElementById('fhr-select');
@@ -116,6 +205,7 @@
             }
         }
 
+        // Initial load
         window.onload = updateMap;
     </script>
 </body>
