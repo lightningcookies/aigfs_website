@@ -47,8 +47,8 @@ VAR_CONFIG = {
         'unit_conv': lambda x: x / 100.0, 'unit_label': 'hPa',
         'filter': {'shortName': 'prmsl'}
     },
-    'u10': { 'cmap': 'viridis', 'levels': np.arange(-60, 61, 10), 'unit_conv': lambda x: x * 2.23694, 'unit_label': 'mph', 'filter': {'typeOfLevel': 'heightAboveGround', 'level': 10, 'shortName': 'u10'} },
-    'v10': { 'cmap': 'viridis', 'levels': np.arange(-60, 61, 10), 'unit_conv': lambda x: x * 2.23694, 'unit_label': 'mph', 'filter': {'typeOfLevel': 'heightAboveGround', 'level': 10, 'shortName': 'v10'} }
+    'u10': { 'cmap': 'viridis', 'levels': np.arange(-60, 61, 10), 'unit_conv': lambda x: x * 2.23694, 'unit_label': 'mph', 'filter': {'typeOfLevel': 'heightAboveGround', 'level': 10} },
+    'v10': { 'cmap': 'viridis', 'levels': np.arange(-60, 61, 10), 'unit_conv': lambda x: x * 2.23694, 'unit_label': 'mph', 'filter': {'typeOfLevel': 'heightAboveGround', 'level': 10} }
 }
 
 def generate_map_task(args):
@@ -79,7 +79,17 @@ def generate_map_task(args):
         )
         
         # 1. Coordinate Wrapping & Conversion
-        actual_var = list(ds.data_vars)[0]
+        if not ds.data_vars:
+            raise ValueError(f"No variables found matching filter {config['filter']}")
+            
+        # Find the actual variable name (e.g., 't2m', 'u', 'v10', etc.)
+        actual_var = None
+        for v in ds.data_vars:
+            if var_key in v or v in ['u', 'v', 'gh', 'prmsl', 'tp']:
+                actual_var = v
+                break
+        if not actual_var: actual_var = list(ds.data_vars)[0]
+
         data = config['unit_conv'](ds[actual_var])
         data = data.assign_coords(longitude=(((data.longitude + 180) % 360) - 180)).sortby(['latitude', 'longitude'])
 
