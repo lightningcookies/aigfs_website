@@ -25,27 +25,28 @@ REGIONS = {
     'west': {'extent': [-126, -103, 31, 50], 'max_fhr': 168, 'dpi': 220}
 }
 
-# --- NWS STYLE COLORMAPS ---
-# Official NWS Precipitation Colors
+# --- FIXED NWS STYLE COLORMAPS ---
+# Added 2 colors to reach 13 total (matches 12 levels + 'both' extensions)
 NWS_PRECIP_COLORS = [
+    '#E1E1E1', # Trace/Mist
     '#A6F28F', '#3DBA3D', '#166B16', '#1EB5EE', '#093BB3', 
-    '#D32BE2', '#FF00F5', '#FFBA00', '#FF0000', '#B50000', '#7F0000'
+    '#D32BE2', '#FF00F5', '#FFBA00', '#FF0000', '#B50000', '#7F0000',
+    '#4B0000'  # Extreme
 ]
 NWS_PRECIP_LEVELS = [0.01, 0.1, 0.25, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0, 8.0, 10.0]
 
-# NWS Temperature Colors (Vibrant bands)
+# NWS Temperature Colors
 NWS_TEMP_COLORS = [
     '#4B0082', '#8A2BE2', '#0000FF', '#4169E1', '#00BFFF', '#00FFFF', 
     '#00FF00', '#32CD32', '#FFFF00', '#FFD700', '#FFA500', '#FF4500', 
     '#FF0000', '#B22222', '#8B0000'
 ]
-NWS_TEMP_LEVELS = np.arange(-40, 121, 10) # 10-degree bands for NWS look
 
 VAR_CONFIG = {
     't2m': {
         'label': 'Temperature (2m)', 
         'cmap': mcolors.LinearSegmentedColormap.from_list('nws_temp', NWS_TEMP_COLORS),
-        'levels': np.arange(-40, 121, 2), # Smooth 2-degree interpolation
+        'levels': np.arange(-40, 121, 2), 
         'unit_conv': lambda x: (x - 273.15) * 9/5 + 32, 'unit_label': '°F',
         'filter': {'typeOfLevel': 'heightAboveGround', 'level': 2}
     },
@@ -101,14 +102,18 @@ def generate_map_task(args):
         ax.set_axis_off()
 
         levels = config['levels']
-        norm = mcolors.BoundaryNorm(levels, ncolors=config['cmap'].N if isinstance(config['cmap'], mcolors.Colormap) else 256, extend='both')
+        cmap = config['cmap']
+        if isinstance(cmap, str): cmap = plt.get_cmap(cmap)
+        
+        # Calculate number of bins needed
+        n_bins = len(levels) + 1 # len(levels)-1 intervals + 2 extensions
+        norm = mcolors.BoundaryNorm(levels, ncolors=cmap.N, extend='both')
 
         if var_key == 'tp':
             data = data.where(data >= 0.01)
         
-        # Grid-perfect alignment
         data.plot.pcolormesh(ax=ax, transform=ccrs.PlateCarree(), 
-                            cmap=config['cmap'], norm=norm, 
+                            cmap=cmap, norm=norm, 
                             add_colorbar=False, add_labels=False)
         
         ax.set_extent(reg_config['extent'], crs=ccrs.PlateCarree())
@@ -123,17 +128,18 @@ def generate_map_task(args):
         return False
 
 def generate_legends(output_dir):
-    print("--- Generating NWS Style Color Legends ---")
+    print("--- Generating Color Legends ---")
     for var_key, config in VAR_CONFIG.items():
         out_path = os.path.join(output_dir, f"legend_{var_key}.png")
-        # Always re-generate legends when colormaps change
         fig, ax = plt.subplots(figsize=(4, 0.8))
         fig.subplots_adjust(bottom=0.5)
         levels = config['levels']
         cmap = config['cmap']
         if isinstance(cmap, str): cmap = plt.get_cmap(cmap)
         
+        # Ensure BoundaryNorm doesn't exceed color count
         norm = mcolors.BoundaryNorm(levels, ncolors=cmap.N, extend='both')
+        
         cb = plt.colorbar(plt.cm.ScalarMappable(norm=norm, cmap=cmap), cax=ax, orientation='horizontal',
                          ticks=levels[::2] if len(levels) > 10 else levels, label=f"{config['unit_label']}")
         cb.ax.tick_params(labelsize=8, colors='white')
@@ -142,11 +148,15 @@ def generate_legends(output_dir):
         plt.close(fig)
 
 def run_processor_service():
-    print(f"--- AIGFS NWS-Style Parallel Processor Service Started ---")
+    print(f"--- AIGFS Parallel Processor Service Started ({MAX_WORKERS} Workers) ---")
     data_dir = "data"
     output_dir = os.path.join("static", "maps")
     os.makedirs(output_dir, exist_ok=True)
-    generate_legends(output_dir)
+    
+    try:
+        generate_legends(output_dir)
+    except Exception as e:
+        print(f"Legend generation error: {e}")
 
     while True:
         tasks = []
@@ -171,7 +181,7 @@ def run_processor_service():
             if len(tasks) >= 100: break
         
         if tasks:
-            print(f"\n[Parallel Cycle] Processing {len(tasks)} new NWS-style map tasks...")
+            print(f"\n[Parallel Cycle] Processing {len(tasks)} tasks...")
             with Pool(MAX_WORKERS) as pool:
                 results = pool.map(generate_map_task, tasks)
             print(f"  > Cycle complete. New maps: {sum(1 for r in results if r is True)}")
