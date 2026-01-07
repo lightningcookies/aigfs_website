@@ -144,7 +144,6 @@ def process_file(file_path):
                 if not ds.data_vars:
                     ds.close()
                     if os.path.exists(index_path): os.remove(index_path)
-                    print(f"  [WARN] {internal_name} not found in {basename}")
                     return
 
                 var = list(ds.data_vars)[0]
@@ -214,6 +213,10 @@ def process_file(file_path):
                     continue
 
                 if config['key'] not in data_cache:
+                    continue
+                
+                # SPECIAL CASE: Wind Speed needs u10 and v10, which might be missing in long-range forecasts
+                if config['key'] == 'wind_speed' and 'wind_speed' not in data_cache:
                     continue
 
                 raw_data = data_cache[config['key']]
