@@ -13,7 +13,7 @@ from datetime import datetime
 
 # Processing settings
 CLEANUP_GRIB = False
-REPROCESS = False     
+REPROCESS = True     
 MAX_FILES_PER_CYCLE = 10 
 # SET THIS based on your core count. 4 is safe for 16GB.
 MAX_WORKERS = min(4, cpu_count()) 
@@ -98,6 +98,10 @@ def generate_map_task(args):
 
         data = config['unit_conv'](ds[actual_var])
 
+        # Fix for Global Longitude Wrap (0-360 to -180-180)
+        if region_name == 'global':
+            data = data.assign_coords(longitude=(((data.longitude + 180) % 360) - 180)).sortby('longitude')
+
         fig = plt.figure(figsize=(20, 10), frameon=False)
         ax = plt.axes([0, 0, 1, 1], projection=ccrs.PlateCarree())
         ax.set_axis_off()
@@ -108,14 +112,17 @@ def generate_map_task(args):
         if var_key == 'tp':
             data = data.where(data >= 0.01)
         
-        data.plot.contourf(ax=ax, transform=ccrs.PlateCarree(), 
-                         levels=levels, cmap=config['cmap'], norm=norm, 
-                         add_colorbar=False, add_labels=False)
-        
-        if reg_config['extent']:
-            ax.set_extent(reg_config['extent'], crs=ccrs.PlateCarree())
+        # Use pcolormesh for Global to ensure exact pixel-to-grid alignment
+        if region_name == 'global':
+            data.plot.pcolormesh(ax=ax, transform=ccrs.PlateCarree(), 
+                                cmap=config['cmap'], norm=norm, 
+                                add_colorbar=False, add_labels=False)
+            ax.set_extent([-180, 180, -90, 90], crs=ccrs.PlateCarree())
         else:
-            ax.set_global()
+            data.plot.contourf(ax=ax, transform=ccrs.PlateCarree(), 
+                             levels=levels, cmap=config['cmap'], norm=norm, 
+                             add_colorbar=False, add_labels=False)
+            ax.set_extent(reg_config['extent'], crs=ccrs.PlateCarree())
         
         plt.savefig(out_path, bbox_inches=0, pad_inches=0, transparent=True, dpi=reg_config['dpi'])
         
