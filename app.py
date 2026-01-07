@@ -13,8 +13,7 @@ VAR_DISPLAY = {
     't2m': 'Temperature (2m)',
     'tp': 'Precipitation (6h)',
     'prmsl': 'MSL Pressure',
-    'u10': 'U Wind (10m)',
-    'v10': 'V Wind (10m)'
+    'wind_speed': 'Wind Speed (10m)',
 }
 
 REGION_DISPLAY = {
@@ -23,6 +22,7 @@ REGION_DISPLAY = {
     'west': 'Western US'
 }
 
+# Used to lookup filter params for GRIB access
 VAR_FILTERS = {
     't2m': {'typeOfLevel': 'heightAboveGround', 'level': 2},
     'u10': {'typeOfLevel': 'heightAboveGround', 'level': 10, 'shortName': 'u10'},
@@ -36,6 +36,7 @@ UNIT_CONV = {
     'prmsl': lambda x: float(x) / 100.0,
     'u10': lambda x: float(x) * 2.23694,
     'v10': lambda x: float(x) * 2.23694,
+    'wind_speed': lambda x: float(x) * 2.23694,
     'tp': lambda x: float(x) / 25.4
 }
 
@@ -65,6 +66,9 @@ def index():
             if len(parts) == 6:
                 region, date, run, fhr, var = parts[1], parts[2], parts[3], parts[4], parts[5]
                 
+                # Filter out unknown variables from display
+                if var not in VAR_DISPLAY: continue
+
                 if date not in catalog:
                     mst_dt = utc_to_mst(date, "00") # Use 00 as base for date label
                     catalog[date] = {'label': mst_dt.strftime("%b %d, %Y"), 'runs': {}}
@@ -96,8 +100,9 @@ def index():
         return dt.timestamp()
         
     available_runs = sorted(catalog[latest_date]['runs'].keys(), key=run_sort_key)
-    latest_run = available_runs[0]
-    
+    if not available_runs:
+         return "No valid runs found."
+
     # Convert sets to sorted lists for JSON
     for d in catalog:
         for r in catalog[d]['runs']:
@@ -114,7 +119,6 @@ def index():
 
 @app.route('/api/value')
 def get_value():
-    # ... (same as before)
     date = request.args.get('date')
     run = request.args.get('run')
     fhr = request.args.get('fhr')
@@ -130,19 +134,29 @@ def get_value():
     if not os.path.exists(file_path):
         return jsonify({'error': 'Data file not found'}), 404
 
-    ds = None
     try:
-        ds = xr.open_dataset(file_path, engine='cfgrib', backend_kwargs={'filter_by_keys': VAR_FILTERS[var]})
-        actual_var = list(ds.data_vars)[0]
-        value = ds[actual_var].sel(latitude=lat, longitude=lon, method='nearest').values
-        final_value = UNIT_CONV[var](value)
-        return jsonify({'value': round(final_value, 2), 'lat': lat, 'lon': lon})
+        if var == 'wind_speed':
+            # Load U and V
+            ds_u = xr.open_dataset(file_path, engine='cfgrib', backend_kwargs={'filter_by_keys': VAR_FILTERS['u10']})
+            u_val = ds_u['u10'].sel(latitude=lat, longitude=lon, method='nearest').values
+            ds_u.close()
+            
+            ds_v = xr.open_dataset(file_path, engine='cfgrib', backend_kwargs={'filter_by_keys': VAR_FILTERS['v10']})
+            v_val = ds_v['v10'].sel(latitude=lat, longitude=lon, method='nearest').values
+            ds_v.close()
+            
+            final_value = UNIT_CONV['wind_speed'](np.sqrt(u_val**2 + v_val**2))
+        else:
+            ds = xr.open_dataset(file_path, engine='cfgrib', backend_kwargs={'filter_by_keys': VAR_FILTERS[var]})
+            actual_var = list(ds.data_vars)[0]
+            value = ds[actual_var].sel(latitude=lat, longitude=lon, method='nearest').values
+            final_value = UNIT_CONV[var](value)
+            ds.close()
+
+        return jsonify({'value': round(float(final_value), 2), 'lat': lat, 'lon': lon})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
     finally:
-        if ds:
-            ds.close()
-            del ds
         gc.collect()
 
 @app.route('/static/maps/<path:filename>')
