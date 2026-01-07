@@ -84,7 +84,17 @@ def generate_map_task(args):
         mem = psutil.virtual_memory()
         if mem.available < (MIN_FREE_RAM_GB * 1024**3): return "LOW_RAM"
 
-        ds = xr.open_dataset(file_path, engine='cfgrib', backend_kwargs={'filter_by_keys': config['filter']})
+        # Unique index path for each process to avoid "fighting" over index files
+        index_path = f"{file_path}.{os.getpid()}.idx"
+        
+        ds = xr.open_dataset(
+            file_path, 
+            engine='cfgrib', 
+            backend_kwargs={
+                'filter_by_keys': config['filter'],
+                'indexpath': index_path
+            }
+        )
         actual_var = list(ds.data_vars)[0] if ds.data_vars else None
         if not actual_var:
             ds.close()
@@ -123,6 +133,12 @@ def generate_map_task(args):
         
         plt.close(fig)
         ds.close()
+        
+        # Cleanup the unique index file immediately
+        try:
+            if os.path.exists(index_path): os.remove(index_path)
+        except: pass
+
         del data
         gc.collect()
         return True
