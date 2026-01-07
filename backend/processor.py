@@ -66,8 +66,17 @@ def generate_map_task(args):
         mem = psutil.virtual_memory()
         if mem.available < (MIN_FREE_RAM_GB * 1024**3): return "LOW_RAM"
 
-        index_path = f"{file_path}.{os.getpid()}.idx"
-        ds = xr.open_dataset(file_path, engine='cfgrib', backend_kwargs={'filter_by_keys': config['filter'], 'indexpath': index_path})
+        # Unique index per file AND variable to prevent cfgrib conflicts
+        index_path = f"{file_path}.{var_key}.{os.getpid()}.idx"
+        
+        ds = xr.open_dataset(
+            file_path, 
+            engine='cfgrib', 
+            backend_kwargs={
+                'filter_by_keys': config['filter'], 
+                'indexpath': index_path
+            }
+        )
         
         # 1. Coordinate Wrapping & Conversion
         actual_var = list(ds.data_vars)[0]
@@ -108,6 +117,7 @@ def generate_map_task(args):
         gc.collect()
         return True
     except Exception as e:
+        print(f"  [ERROR] Failed {out_filename}: {e}")
         if ds: ds.close()
         return False
 
