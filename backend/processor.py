@@ -61,6 +61,10 @@ def generate_map_task(args):
     if os.path.exists(out_path) and not REPROCESS:
         return False
 
+    # SILENCER: Skip precipitation at hour 0 (it never exists)
+    if var_key == 'tp' and fhr_str == '000':
+        return False
+
     ds = None
     try:
         mem = psutil.virtual_memory()
@@ -133,8 +137,16 @@ def generate_map_task(args):
         gc.collect()
         return True
     except Exception as e:
-        print(f"  [ERROR] Failed {out_filename}: {e}")
+        # Don't print full errors for missing variables, just a quiet note
+        if "No variables found matching filter" in str(e):
+            pass 
+        else:
+            print(f"  [ERROR] Failed {out_filename}: {e}")
+        
         if ds: ds.close()
+        if os.path.exists(index_path):
+            try: os.remove(index_path)
+            except: pass
         return False
 
 def generate_legends(output_dir):
