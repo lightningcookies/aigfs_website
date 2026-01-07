@@ -4,11 +4,12 @@ After=aigfs-downloader.service
 
 [Service]
 Type=simple
-User=lenovo1
-WorkingDirectory=/home/lenovo1/Documents/aigfs/aigfs_website
-ExecStart=/home/lenovo1/Documents/aigfs/aigfs_website/venv/bin/python backend/processor.py
+User={{USER}}
+WorkingDirectory=/home/{{USER}}/aigfs_website
+ExecStart=/home/{{USER}}/aigfs_website/venv/bin/python backend/processor.py
 Restart=always
 RestartSec=60
 
 [Install]
 WantedBy=multi-user.target
+

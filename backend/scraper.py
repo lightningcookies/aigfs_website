@@ -28,15 +28,9 @@ def download_aigfs_data(date_str, run, forecast_hours):
                 print(f"File not yet available: {filename}")
                 continue
             response.raise_for_status()
-            
-            # Download to a temporary file first
-            temp_path = target_path + ".tmp"
-            with open(temp_path, 'wb') as f:
+            with open(target_path, 'wb') as f:
                 for chunk in response.iter_content(chunk_size=8192):
                     f.write(chunk)
-            
-            # Rename to final filename only when finished
-            os.replace(temp_path, target_path)
             print(f"Saved to {target_path}")
             downloaded_any = True
         except Exception as e:

@@ -5,44 +5,46 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AIGFS Interactive Weather Viewer</title>
     
-    <!-- Leaflet CSS -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     
     <style>
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; padding: 0; background-color: #1a1a1a; color: white; }
         .header { background: #333; padding: 10px 20px; display: flex; align-items: center; justify-content: space-between; box-shadow: 0 2px 5px rgba(0,0,0,0.5); }
         h1 { margin: 0; font-size: 1.2em; }
-        
         .layout { display: flex; height: calc(100vh - 50px); }
-        
         .sidebar { width: 300px; background: #222; padding: 20px; overflow-y: auto; box-shadow: 2px 0 5px rgba(0,0,0,0.3); }
         .control-group { margin-bottom: 20px; }
         label { display: block; font-size: 0.8em; font-weight: bold; margin-bottom: 5px; color: #aaa; text-transform: uppercase; }
         select { width: 100%; padding: 10px; background: #333; color: white; border: 1px solid #444; border-radius: 4px; font-size: 1em; }
-        
         #map { flex-grow: 1; background: #000; }
-        
         .info-panel { position: absolute; bottom: 20px; right: 20px; background: rgba(0,0,0,0.8); padding: 15px; border-radius: 8px; border: 1px solid #444; z-index: 1000; pointer-events: none; }
         .value-display { font-size: 2em; font-weight: bold; color: #00ffcc; }
         .coords { font-size: 0.8em; color: #888; }
-        
-        .legend { margin-top: 20px; font-size: 0.8em; }
         .nav-buttons { display: flex; gap: 10px; margin-top: 10px; }
         button { flex: 1; padding: 10px; background: #444; color: white; border: none; border-radius: 4px; cursor: pointer; }
         button:hover { background: #555; }
-        
-        /* Loading indicator */
+        .toggle-group { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
+        input[type="checkbox"] { width: 20px; height: 20px; cursor: pointer; }
         #loader { display: none; margin-left: 10px; font-size: 0.8em; color: #00ffcc; }
     </style>
 </head>
 <body>
     <div class="header">
-        <h1>AIGFS Global Interactive <span id="loader">Updating...</span></h1>
+        <h1>AIGFS Global <span id="loader">Updating...</span></h1>
         <div id="status-text" style="font-size: 0.8em; color: #888;">Click map for values</div>
     </div>
 
     <div class="layout">
         <div class="sidebar">
+            <div class="control-group">
+                <label for="region-select">Region</label>
+                <select id="region-select" onchange="updateMap(true)">
+                    {% for r in regions %}
+                    <option value="{{ r.id }}">{{ r.label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
             <div class="control-group">
                 <label for="date-select">Date</label>
                 <select id="date-select" onchange="updateMap()">
@@ -83,8 +85,12 @@
                 </div>
             </div>
 
-            <div class="legend" id="map-legend">
-                <!-- Legend content can be dynamically added later -->
+            <div class="control-group">
+                <label>Map Layers</label>
+                <div class="toggle-group">
+                    <input type="checkbox" id="label-toggle" checked onchange="toggleLabels()">
+                    <span>Show City/Road Labels</span>
+                </div>
             </div>
         </div>
 
@@ -97,74 +103,88 @@
         <div id="var-unit"></div>
     </div>
 
-    <!-- Leaflet JS -->
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     
     <script>
-        // Store display mappings from Python
         const fhrLabels = {
             {% for m in map_data %}
             "{{ m.fhr }}": "{{ m.fhr_display }}",
             {% endfor %}
         };
 
-        // Initialize Leaflet Map
-        const map = L.map('map', {
-            center: [20, 0],
-            zoom: 3,
-            minZoom: 2,
-            maxZoom: 10,
-            backgroundColor: '#000'
-        });
-
-        // Base layer (Dark theme)
-        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+        const map = L.map('map', { center: [39.8, -98.5], zoom: 4, minZoom: 2, maxZoom: 12 });
+        
+        // Base Dark Map
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}{r}.png', {
             attribution: '&copy; OpenStreetMap &copy; CARTO'
+        }).addTo(map);
+
+        // Labels Layer (Optional)
+        const labelsLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}{r}.png', {
+            pane: 'markerPane', // Ensures labels are on top of weather but under popups
+            zIndex: 1000
         }).addTo(map);
 
         let weatherOverlay = null;
 
-        function updateMap() {
+        function toggleLabels() {
+            if (document.getElementById('label-toggle').checked) {
+                labelsLayer.addTo(map);
+            } else {
+                map.removeLayer(labelsLayer);
+            }
+        }
+
+        const REGION_VIEWS = {
+            'global': { center: [20, 0], zoom: 3 },
+            'conus': { center: [39, -98], zoom: 4 },
+            'west': { center: [40, -114], zoom: 5 }
+        };
+
+        function updateMap(regionChanged = false) {
+            const region = document.getElementById('region-select').value;
             const date = document.getElementById('date-select').value;
             const run = document.getElementById('run-select').value;
             const varName = document.getElementById('var-select').value;
             const fhr = document.getElementById('fhr-select').value;
             
-            const filename = `aigfs_${date}_${run}_${fhr}_${varName}.png`;
-            const imageUrl = `/static/maps/${filename}`;
-            const imageBounds = [[-90, -180], [90, 180]];
-
-            document.getElementById('loader').style.display = 'inline';
-
-            // Remove existing overlay
-            if (weatherOverlay) {
-                map.removeLayer(weatherOverlay);
+            if (regionChanged && REGION_VIEWS[region]) {
+                map.flyTo(REGION_VIEWS[region].center, REGION_VIEWS[region].zoom);
             }
 
-            // Create new overlay
-            weatherOverlay = L.imageOverlay(imageUrl, imageBounds, {
-                opacity: 0.7,
-                interactive: false
+            const filename = `aigfs_${region}_${date}_${run}_${fhr}_${varName}.png`;
+            const imageUrl = `/static/maps/${filename}`;
+            
+            // Bounds logic per region (must match backend extents)
+            const BOUNDS = {
+                'global': [[-90, -180], [90, 180]],
+                'conus': [[23, -125], [50, -66]],
+                'west': [[31, -126], [50, -103]]
+            };
+
+            const imageBounds = BOUNDS[region] || BOUNDS['global'];
+
+            document.getElementById('loader').style.display = 'inline';
+            if (weatherOverlay) map.removeLayer(weatherOverlay);
+
+            weatherOverlay = L.imageOverlay(imageUrl, imageBounds, { 
+                opacity: 0.6,
+                zIndex: 500 // Under labels
             }).addTo(map);
 
             weatherOverlay.on('load', () => {
                 document.getElementById('loader').style.display = 'none';
-                // Update the FHR dropdown text to show the time
-                const fhrLabel = fhrLabels[fhr];
-                document.getElementById('status-text').innerText = `Valid: ${fhrLabel}`;
+                document.getElementById('status-text').innerText = `Valid: ${fhrLabels[fhr] || 'F' + fhr}`;
             });
-
             weatherOverlay.on('error', () => {
                 document.getElementById('loader').style.display = 'none';
-                console.error("Map image not found: " + filename);
+                document.getElementById('status-text').innerText = "Image not found for this region/time";
             });
         }
 
-        // Click for values
         map.on('click', function(e) {
             const lat = e.latlng.lat.toFixed(4);
             const lon = e.latlng.lng.toFixed(4);
-            
             const date = document.getElementById('date-select').value;
             const run = document.getElementById('run-select').value;
             const varName = document.getElementById('var-select').value;
@@ -172,27 +192,18 @@
 
             document.getElementById('info-panel').style.display = 'block';
             document.getElementById('click-coords').innerText = `${lat}, ${lon}`;
-            document.getElementById('click-value').innerText = "Loading...";
+            document.getElementById('click-value').innerText = "...";
 
             fetch(`/api/value?date=${date}&run=${run}&fhr=${fhr}&var=${varName}&lat=${lat}&lon=${lon}`)
-                .then(response => response.json())
+                .then(r => r.json())
                 .then(data => {
                     if (data.error) {
                         document.getElementById('click-value').innerText = "N/A";
                     } else {
-                        const units = {
-                            't2m': '°C',
-                            'tp': 'mm',
-                            'prmsl': 'hPa',
-                            'u10': 'm/s',
-                            'v10': 'm/s'
-                        };
+                        const units = { 't2m': '°C', 'tp': 'mm', 'prmsl': 'hPa', 'u10': 'm/s', 'v10': 'm/s' };
                         document.getElementById('click-value').innerText = data.value;
                         document.getElementById('var-unit').innerText = units[varName] || "";
                     }
-                })
-                .catch(err => {
-                    document.getElementById('click-value').innerText = "Error";
                 });
         });
 
@@ -204,8 +215,6 @@
                 updateMap();
             }
         }
-
-        // Initial load
         window.onload = updateMap;
     </script>
 </body>

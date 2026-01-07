@@ -4,6 +4,7 @@ import xarray as xr
 import numpy as np
 from datetime import datetime, timedelta
 import pytz
+import gc
 
 app = Flask(__name__)
 
@@ -14,6 +15,13 @@ VAR_DISPLAY = {
     'prmsl': 'MSL Pressure',
     'u10': 'U Wind (10m)',
     'v10': 'V Wind (10m)'
+}
+
+# Display names for regions
+REGION_DISPLAY = {
+    'global': 'Global',
+    'conus': 'USA (CONUS)',
+    'west': 'Western US'
 }
 
 VAR_FILTERS = {
@@ -34,10 +42,13 @@ UNIT_CONV = {
 
 def utc_to_mst(date_str, hour_str):
     """Converts UTC date/run to MST."""
-    utc_dt = datetime.strptime(f"{date_str}{hour_str}", "%Y%m%d%H")
-    utc_dt = pytz.utc.localize(utc_dt)
-    mst_dt = utc_dt.astimezone(pytz.timezone('US/Mountain'))
-    return mst_dt
+    try:
+        utc_dt = datetime.strptime(f"{date_str}{hour_str}", "%Y%m%d%H")
+        utc_dt = pytz.utc.localize(utc_dt)
+        mst_dt = utc_dt.astimezone(pytz.timezone('US/Mountain'))
+        return mst_dt
+    except:
+        return datetime.now()
 
 @app.route('/')
 def index():
@@ -49,20 +60,17 @@ def index():
     map_data = []
     for f in files:
         if f.endswith('.png'):
+            # New format: aigfs_region_date_run_fhr_var.png
             parts = f.replace('.png', '').split('_')
-            if len(parts) == 5:
-                date_str = parts[1]
-                run_str = parts[2]
-                fhr_str = parts[3]
-                var_str = parts[4]
-                
-                # Create MST display labels
+            if len(parts) == 6:
+                region_str, date_str, run_str, fhr_str, var_str = parts[1], parts[2], parts[3], parts[4], parts[5]
                 mst_dt = utc_to_mst(date_str, run_str)
-                # Forecast time in MST
                 fhr_dt = mst_dt + timedelta(hours=int(fhr_str))
                 
                 map_data.append({
                     'filename': f,
+                    'region': region_str,
+                    'region_display': REGION_DISPLAY.get(region_str, region_str.capitalize()),
                     'date': date_str,
                     'date_display': mst_dt.strftime("%b %d, %Y"),
                     'run': run_str,
@@ -74,79 +82,70 @@ def index():
                 })
     
     if not map_data:
-        return "No valid map images found."
+        return "No map images found. Processing in progress..."
 
-    # Sorting logic for the UI
-    # We use a dict to get unique values but preserve the original ID for the selector
-    dates = []
-    seen_dates = set()
-    for m in sorted(map_data, key=lambda x: x['date'], reverse=True):
-        if m['date'] not in seen_dates:
-            dates.append({'id': m['date'], 'label': m['date_display']})
-            seen_dates.add(m['date'])
+    # Sorting and grouping logic
+    def get_unique(key, display_key=None):
+        items = []
+        seen = set()
+        # Sort based on the key value
+        for m in sorted(map_data, key=lambda x: x[key], reverse=(key == 'date')):
+            if m[key] not in seen:
+                items.append({'id': m[key], 'label': m[display_key] if display_key else m[key]})
+                seen.add(m[key])
+        return items
 
-    runs = []
-    seen_runs = set()
-    for m in sorted(map_data, key=lambda x: x['run']):
-        if m['run'] not in seen_runs:
-            runs.append({'id': m['run'], 'label': m['run_display']})
-            seen_runs.add(m['run'])
-
+    regions = get_unique('region', 'region_display')
+    dates = get_unique('date', 'date_display')
+    runs = get_unique('run', 'run_display')
     fhrs = sorted(list(set(m['fhr'] for m in map_data)))
+    vars_list = get_unique('var', 'var_display')
     
-    vars_list = []
-    seen_vars = set()
-    for m in sorted(map_data, key=lambda x: x['var']):
-        if m['var'] not in seen_vars:
-            vars_list.append({'id': m['var'], 'label': m['var_display']})
-            seen_vars.add(m['var'])
-    
-    return render_template('index.html', dates=dates, runs=runs, fhrs=fhrs, vars=vars_list, map_data=map_data)
+    return render_template('index.html', 
+                          regions=regions,
+                          dates=dates, 
+                          runs=runs, 
+                          fhrs=fhrs, 
+                          vars=vars_list, 
+                          map_data=map_data)
 
 @app.route('/api/value')
 def get_value():
-    """
-    Returns the exact value from a GRIB file for a given lat/lon.
-    """
     date = request.args.get('date')
     run = request.args.get('run')
     fhr = request.args.get('fhr')
     var = request.args.get('var')
-    lat = float(request.args.get('lat'))
-    lon = float(request.args.get('lon'))
-
-    # Normalize longitude to 0-360 if needed (GRIB standard)
-    if lon < 0:
-        lon += 360
+    try:
+        lat = float(request.args.get('lat'))
+        lon = float(request.args.get('lon'))
+        if lon < 0: lon += 360
+    except:
+        return jsonify({'error': 'Invalid coordinates'}), 400
 
     file_path = os.path.join('data', f"{date}_{run}", f"aigfs.t{run}z.sfc.f{fhr}.grib2")
     
     if not os.path.exists(file_path):
         return jsonify({'error': 'Data file not found'}), 404
 
+    ds = None
     try:
         ds = xr.open_dataset(file_path, engine='cfgrib', 
                             backend_kwargs={'filter_by_keys': VAR_FILTERS[var]})
-        
         actual_var = list(ds.data_vars)[0]
-        # Find nearest point
         value = ds[actual_var].sel(latitude=lat, longitude=lon, method='nearest').values
-        ds.close()
-
-        # Convert units
         final_value = UNIT_CONV[var](value)
-        
-        return jsonify({
-            'value': round(final_value, 2),
-            'lat': lat,
-            'lon': lon
-        })
+        return jsonify({'value': round(final_value, 2), 'lat': lat, 'lon': lon})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+    finally:
+        if ds:
+            ds.close()
+            del ds
+        gc.collect()
 
 @app.route('/static/maps/<path:filename>')
 def serve_map(filename):
     return send_from_directory('static/maps', filename)
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    app.run(host='0.0.0.0', port=5000, debug=False)
