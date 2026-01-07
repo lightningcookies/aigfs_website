@@ -36,7 +36,8 @@ NWS_PRESSURE_COLORS = ['#0000FF', '#4169E1', '#00BFFF', '#E0FFFF', '#FFFFE0', '#
 PRESSURE_LEVELS = np.arange(960, 1060, 4)
 
 # Wind Speed Colors (NWS-ish)
-WIND_COLORS = ['#E0E0E0', '#B0C4DE', '#87CEFA', '#00BFFF', '#1E90FF', '#0000FF', '#8A2BE2', '#DA70D6', '#FF00FF', '#FF1493', '#8B0000']
+# Added padding colors for <0 (impossible) and >100 (extreme) to match BoundaryNorm bins
+WIND_COLORS = ['#FFFFFF', '#E0E0E0', '#B0C4DE', '#87CEFA', '#00BFFF', '#1E90FF', '#0000FF', '#8A2BE2', '#DA70D6', '#FF00FF', '#FF1493', '#8B0000', '#4B0000']
 WIND_LEVELS = [0, 5, 10, 15, 20, 25, 30, 40, 50, 60, 80, 100]
 
 VAR_CONFIG = {
