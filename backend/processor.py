@@ -82,7 +82,6 @@ def generate_map_task(args):
         if not ds.data_vars:
             raise ValueError(f"No variables found matching filter {config['filter']}")
             
-        # Find the actual variable name (e.g., 't2m', 'u', 'v10', etc.)
         actual_var = None
         for v in ds.data_vars:
             if var_key in v or v in ['u', 'v', 'gh', 'prmsl', 'tp']:
@@ -91,11 +90,18 @@ def generate_map_task(args):
         if not actual_var: actual_var = list(ds.data_vars)[0]
 
         data = config['unit_conv'](ds[actual_var])
-        data = data.assign_coords(longitude=(((data.longitude + 180) % 360) - 180)).sortby(['latitude', 'longitude'])
+        data = data.assign_coords(longitude=(((data.longitude + 180) % 360) - 180))
+        
+        # Sort Latitude DESCENDING (North to South) and Longitude ASCENDING (West to East)
+        # This ensures the slice works and the image is right-side up.
+        data = data.sortby('latitude', ascending=False).sortby('longitude', ascending=True)
 
         # 2. Strict Regional Cropping
         lon_min, lon_max, lat_min, lat_max = reg_config['extent']
         data = data.sel(latitude=slice(lat_max, lat_min), longitude=slice(lon_min, lon_max))
+
+        if data.size == 0:
+            raise ValueError(f"Cropped data is empty for extent {reg_config['extent']}")
 
         # 3. Interpolate to a fixed high-res grid (removes alignment errors)
         # This ensures the array exactly fits the output image size
