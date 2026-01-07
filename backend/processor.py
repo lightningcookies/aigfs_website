@@ -144,8 +144,7 @@ def process_file(file_path):
                 if not ds.data_vars:
                     ds.close()
                     if os.path.exists(index_path): os.remove(index_path)
-                    # excessive logging
-                    # print(f"Variable {internal_name} not found in {basename}")
+                    print(f"  [WARN] {internal_name} not found in {basename}")
                     return
 
                 var = list(ds.data_vars)[0]
