@@ -26,16 +26,12 @@ REGIONS = {
 }
 
 # --- FIXED NWS STYLE COLORMAPS ---
-# Added 2 colors to reach 13 total (matches 12 levels + 'both' extensions)
 NWS_PRECIP_COLORS = [
-    '#E1E1E1', # Trace/Mist
-    '#A6F28F', '#3DBA3D', '#166B16', '#1EB5EE', '#093BB3', 
-    '#D32BE2', '#FF00F5', '#FFBA00', '#FF0000', '#B50000', '#7F0000',
-    '#4B0000'  # Extreme
+    '#E1E1E1', '#A6F28F', '#3DBA3D', '#166B16', '#1EB5EE', '#093BB3', 
+    '#D32BE2', '#FF00F5', '#FFBA00', '#FF0000', '#B50000', '#7F0000', '#4B0000'
 ]
 NWS_PRECIP_LEVELS = [0.01, 0.1, 0.25, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0, 8.0, 10.0]
 
-# NWS Temperature Colors
 NWS_TEMP_COLORS = [
     '#4B0082', '#8A2BE2', '#0000FF', '#4169E1', '#00BFFF', '#00FFFF', 
     '#00FF00', '#32CD32', '#FFFF00', '#FFD700', '#FFA500', '#FF4500', 
@@ -94,29 +90,35 @@ def generate_map_task(args):
             ds.close()
             return False
 
+        # Robust coordinate processing
         data = config['unit_conv'](ds[actual_var])
         data = data.assign_coords(longitude=(((data.longitude + 180) % 360) - 180)).sortby('longitude')
 
+        # Create figure with EXACT aspect ratio and NO borders
         fig = plt.figure(figsize=(20, 10))
         ax = plt.axes([0, 0, 1, 1], projection=ccrs.PlateCarree())
         ax.set_axis_off()
+        
+        # CRITICAL: Force the map to stretch to the edges of the image
+        # This ensures the PNG bounds match Leaflet's bounds perfectly
+        ax.set_aspect('auto', adjustable='datalim')
 
         levels = config['levels']
         cmap = config['cmap']
         if isinstance(cmap, str): cmap = plt.get_cmap(cmap)
-        
-        # Calculate number of bins needed
-        n_bins = len(levels) + 1 # len(levels)-1 intervals + 2 extensions
         norm = mcolors.BoundaryNorm(levels, ncolors=cmap.N, extend='both')
 
         if var_key == 'tp':
             data = data.where(data >= 0.01)
         
+        # Use pcolormesh for all to ensure grid-perfect alignment
         data.plot.pcolormesh(ax=ax, transform=ccrs.PlateCarree(), 
                             cmap=cmap, norm=norm, 
                             add_colorbar=False, add_labels=False)
         
         ax.set_extent(reg_config['extent'], crs=ccrs.PlateCarree())
+        
+        # Save with zero padding and no background
         plt.savefig(out_path, bbox_inches=0, pad_inches=0, transparent=True, dpi=reg_config['dpi'])
         
         plt.close(fig)
@@ -136,10 +138,7 @@ def generate_legends(output_dir):
         levels = config['levels']
         cmap = config['cmap']
         if isinstance(cmap, str): cmap = plt.get_cmap(cmap)
-        
-        # Ensure BoundaryNorm doesn't exceed color count
         norm = mcolors.BoundaryNorm(levels, ncolors=cmap.N, extend='both')
-        
         cb = plt.colorbar(plt.cm.ScalarMappable(norm=norm, cmap=cmap), cax=ax, orientation='horizontal',
                          ticks=levels[::2] if len(levels) > 10 else levels, label=f"{config['unit_label']}")
         cb.ax.tick_params(labelsize=8, colors='white')
@@ -185,6 +184,15 @@ def run_processor_service():
             with Pool(MAX_WORKERS) as pool:
                 results = pool.map(generate_map_task, tasks)
             print(f"  > Cycle complete. New maps: {sum(1 for r in results if r is True)}")
+        
+        # Cleanup orphan .idx files
+        for root, dirs, files in os.walk(data_dir):
+            for f in files:
+                if f.endswith('.idx'):
+                    grib_f = f.replace('.idx', '')
+                    if not os.path.exists(os.path.join(root, grib_f)):
+                        try: os.remove(os.path.join(root, f))
+                        except: pass
         
         time.sleep(60 if tasks else 300)
 
