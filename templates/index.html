@@ -4,9 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AIGFS Interactive Weather Viewer</title>
-    
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-    
     <style>
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; padding: 0; background-color: #1a1a1a; color: white; }
         .header { background: #333; padding: 10px 20px; display: flex; align-items: center; justify-content: space-between; box-shadow: 0 2px 5px rgba(0,0,0,0.5); }
@@ -24,7 +22,6 @@
         button { flex: 1; padding: 10px; background: #444; color: white; border: none; border-radius: 4px; cursor: pointer; }
         button:hover { background: #555; }
         .toggle-group { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
-        input[type="checkbox"] { width: 20px; height: 20px; cursor: pointer; }
         #loader { display: none; margin-left: 10px; font-size: 0.8em; color: #00ffcc; }
     </style>
 </head>
@@ -37,47 +34,35 @@
     <div class="layout">
         <div class="sidebar">
             <div class="control-group">
-                <label for="region-select">Region</label>
-                <select id="region-select" onchange="updateMap(true)">
-                    {% for r in regions %}
-                    <option value="{{ r.id }}">{{ r.label }}</option>
-                    {% endfor %}
-                </select>
-            </div>
-
-            <div class="control-group">
                 <label for="date-select">Date</label>
-                <select id="date-select" onchange="updateMap()">
-                    {% for d in dates %}
-                    <option value="{{ d.id }}">{{ d.label }}</option>
+                <select id="date-select" onchange="onDateChange()">
+                    {% for d in sorted_dates %}
+                    <option value="{{ d }}">{{ catalog[d].label }}</option>
                     {% endfor %}
                 </select>
             </div>
 
             <div class="control-group">
                 <label for="run-select">Model Run (MST)</label>
-                <select id="run-select" onchange="updateMap()">
-                    {% for r in runs %}
-                    <option value="{{ r.id }}">{{ r.label }}</option>
-                    {% endfor %}
+                <select id="run-select" onchange="onRunChange()">
+                </select>
+            </div>
+
+            <div class="control-group">
+                <label for="region-select">Region</label>
+                <select id="region-select" onchange="updateMap(true)">
                 </select>
             </div>
 
             <div class="control-group">
                 <label for="var-select">Variable</label>
                 <select id="var-select" onchange="updateMap()">
-                    {% for v in vars %}
-                    <option value="{{ v.id }}">{{ v.label }}</option>
-                    {% endfor %}
                 </select>
             </div>
 
             <div class="control-group">
                 <label for="fhr-select">Forecast Hour</label>
                 <select id="fhr-select" onchange="updateMap()">
-                    {% for f in fhrs %}
-                    <option value="{{ f }}">F{{ f }}</option>
-                    {% endfor %}
                 </select>
                 <div class="nav-buttons">
                     <button onclick="changeFhr(-6)">- 6h</button>
@@ -109,84 +94,89 @@
     </div>
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    
     <script>
-        const fhrLabels = {
-            {% for m in map_data %}
-            "{{ m.fhr }}": "{{ m.fhr_display }}",
-            {% endfor %}
-        };
+        const catalog = {{ catalog|tojson }};
+        const fhrLabels = {{ fhr_labels|tojson }};
+        const varDisplay = {{ var_display|tojson }};
+        const regionDisplay = {{ region_display|tojson }};
 
         const map = L.map('map', { center: [39.8, -98.5], zoom: 4, minZoom: 2, maxZoom: 12 });
-        
-        // Base Dark Map
-        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}{r}.png', {
-            attribution: '&copy; OpenStreetMap &copy; CARTO'
-        }).addTo(map);
-
-        // Labels Layer (Optional)
-        const labelsLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}{r}.png', {
-            pane: 'markerPane', // Ensures labels are on top of weather but under popups
-            zIndex: 1000
-        }).addTo(map);
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}{r}.png', { attribution: '&copy; CARTO' }).addTo(map);
+        const labelsLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}{r}.png', { pane: 'markerPane', zIndex: 1000 }).addTo(map);
 
         let weatherOverlay = null;
 
-        function toggleLabels() {
-            if (document.getElementById('label-toggle').checked) {
-                labelsLayer.addTo(map);
-            } else {
-                map.removeLayer(labelsLayer);
-            }
+        function populateSelect(id, items, displayMap = null) {
+            const select = document.getElementById(id);
+            const currentVal = select.value;
+            select.innerHTML = '';
+            items.forEach(item => {
+                const opt = document.createElement('option');
+                opt.value = item;
+                opt.innerText = displayMap ? (displayMap[item] || item) : item;
+                if (typeof item === 'object') {
+                    opt.value = item.id;
+                    opt.innerText = item.label;
+                }
+                select.appendChild(opt);
+            });
+            if (items.includes(currentVal)) select.value = currentVal;
         }
 
-        const REGION_VIEWS = {
-            'global': { center: [20, 0], zoom: 3 },
-            'conus': { center: [39, -98], zoom: 4 },
-            'west': { center: [40, -114], zoom: 5 }
-        };
+        function onDateChange() {
+            const date = document.getElementById('date-select').value;
+            const runs = Object.keys(catalog[date].runs).sort((a,b) => a.localeCompare(b));
+            const runItems = runs.map(r => ({ id: r, label: catalog[date].runs[r].label }));
+            populateSelect('run-select', runItems);
+            onRunChange();
+        }
 
-        function updateMap(regionChanged = false) {
-            const region = document.getElementById('region-select').value;
+        function onRunChange() {
             const date = document.getElementById('date-select').value;
             const run = document.getElementById('run-select').value;
+            const runData = catalog[date].runs[run];
+            
+            populateSelect('region-select', runData.regions, regionDisplay);
+            populateSelect('var-select', runData.vars, varDisplay);
+            
+            const fhrItems = runData.fhrs.map(f => ({ id: f, label: 'F' + f }));
+            populateSelect('fhr-select', fhrItems);
+            
+            updateMap();
+        }
+
+        function toggleLabels() {
+            if (document.getElementById('label-toggle').checked) labelsLayer.addTo(map);
+            else map.removeLayer(labelsLayer);
+        }
+
+        const REGION_VIEWS = { 'global': { center: [20, 0], zoom: 3 }, 'conus': { center: [39, -98], zoom: 4 }, 'west': { center: [40, -114], zoom: 5 } };
+
+        function updateMap(regionChanged = false) {
+            const date = document.getElementById('date-select').value;
+            const run = document.getElementById('run-select').value;
+            const region = document.getElementById('region-select').value;
             const varName = document.getElementById('var-select').value;
             const fhr = document.getElementById('fhr-select').value;
             
-            if (regionChanged && REGION_VIEWS[region]) {
-                map.flyTo(REGION_VIEWS[region].center, REGION_VIEWS[region].zoom);
-            }
+            if (regionChanged && REGION_VIEWS[region]) map.flyTo(REGION_VIEWS[region].center, REGION_VIEWS[region].zoom);
 
             const filename = `aigfs_${region}_${date}_${run}_${fhr}_${varName}.png`;
             const imageUrl = `/static/maps/${filename}`;
-            
-            // Bounds logic per region (must match backend extents)
-            const BOUNDS = {
-                'global': [[-90, -180], [90, 180]],
-                'conus': [[23, -125], [50, -66]],
-                'west': [[31, -126], [50, -103]]
-            };
-
-            const imageBounds = BOUNDS[region] || BOUNDS['global'];
+            const BOUNDS = { 'global': [[-90, -180], [90, 180]], 'conus': [[23, -125], [50, -66]], 'west': [[31, -126], [50, -103]] };
 
             document.getElementById('loader').style.display = 'inline';
             if (weatherOverlay) map.removeLayer(weatherOverlay);
-
-            weatherOverlay = L.imageOverlay(imageUrl, imageBounds, { 
-                opacity: 0.6,
-                zIndex: 500 // Under labels
-            }).addTo(map);
-
+            weatherOverlay = L.imageOverlay(imageUrl, BOUNDS[region] || BOUNDS['global'], { opacity: 0.6 }).addTo(map);
+            
             weatherOverlay.on('load', () => {
                 document.getElementById('loader').style.display = 'none';
                 document.getElementById('status-text').innerText = `Valid: ${fhrLabels[fhr] || 'F' + fhr}`;
-                
-                // Update Legend Image
                 document.getElementById('legend-img').src = `/static/maps/legend_${varName}.png`;
             });
             weatherOverlay.on('error', () => {
                 document.getElementById('loader').style.display = 'none';
-                document.getElementById('status-text').innerText = "Image not found for this region/time";
+                document.getElementById('status-text').innerText = "Image not found";
             });
         }
 
@@ -205,16 +195,9 @@
             fetch(`/api/value?date=${date}&run=${run}&fhr=${fhr}&var=${varName}&lat=${lat}&lon=${lon}`)
                 .then(r => r.json())
                 .then(data => {
-                    if (data.error) {
-                        document.getElementById('click-value').innerText = "N/A";
-                    } else {
-                        const units = { 
-                            't2m': '°F', 
-                            'tp': 'in', 
-                            'prmsl': 'hPa', 
-                            'u10': 'mph', 
-                            'v10': 'mph' 
-                        };
+                    if (data.error) document.getElementById('click-value').innerText = "N/A";
+                    else {
+                        const units = { 't2m': '°F', 'tp': 'in', 'prmsl': 'hPa', 'u10': 'mph', 'v10': 'mph' };
                         document.getElementById('click-value').innerText = data.value;
                         document.getElementById('var-unit').innerText = units[varName] || "";
                     }
@@ -229,7 +212,7 @@
                 updateMap();
             }
         }
-        window.onload = updateMap;
+        window.onload = onDateChange;
     </script>
 </body>
 </html>

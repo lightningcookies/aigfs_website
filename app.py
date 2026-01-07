@@ -5,10 +5,10 @@ import numpy as np
 from datetime import datetime, timedelta
 import pytz
 import gc
+import json
 
 app = Flask(__name__)
 
-# Variable mapping for better user display
 VAR_DISPLAY = {
     't2m': 'Temperature (2m)',
     'tp': 'Precipitation (6h)',
@@ -17,7 +17,6 @@ VAR_DISPLAY = {
     'v10': 'V Wind (10m)'
 }
 
-# Display names for regions
 REGION_DISPLAY = {
     'global': 'Global',
     'conus': 'USA (CONUS)',
@@ -33,15 +32,14 @@ VAR_FILTERS = {
 }
 
 UNIT_CONV = {
-    't2m': lambda x: (float(x) - 273.15) * 9/5 + 32, # K to F
+    't2m': lambda x: (float(x) - 273.15) * 9/5 + 32,
     'prmsl': lambda x: float(x) / 100.0,
-    'u10': lambda x: float(x) * 2.23694, # m/s to mph
-    'v10': lambda x: float(x) * 2.23694, # m/s to mph
-    'tp': lambda x: float(x) / 25.4 # mm to inches
+    'u10': lambda x: float(x) * 2.23694,
+    'v10': lambda x: float(x) * 2.23694,
+    'tp': lambda x: float(x) / 25.4
 }
 
 def utc_to_mst(date_str, hour_str):
-    """Converts UTC date/run to MST."""
     try:
         utc_dt = datetime.strptime(f"{date_str}{hour_str}", "%Y%m%d%H")
         utc_dt = pytz.utc.localize(utc_dt)
@@ -57,60 +55,66 @@ def index():
         return "No maps generated yet. Please run the backend services."
     
     files = os.listdir(maps_dir)
-    map_data = []
+    # Structure: { date: { run: { region: { var: [fhrs] } } } }
+    catalog = {}
+    fhr_labels = {}
+
     for f in files:
-        if f.endswith('.png'):
-            # New format: aigfs_region_date_run_fhr_var.png
+        if f.endswith('.png') and not f.startswith('legend_'):
             parts = f.replace('.png', '').split('_')
             if len(parts) == 6:
-                region_str, date_str, run_str, fhr_str, var_str = parts[1], parts[2], parts[3], parts[4], parts[5]
-                mst_dt = utc_to_mst(date_str, run_str)
-                fhr_dt = mst_dt + timedelta(hours=int(fhr_str))
+                region, date, run, fhr, var = parts[1], parts[2], parts[3], parts[4], parts[5]
                 
-                map_data.append({
-                    'filename': f,
-                    'region': region_str,
-                    'region_display': REGION_DISPLAY.get(region_str, region_str.capitalize()),
-                    'date': date_str,
-                    'date_display': mst_dt.strftime("%b %d, %Y"),
-                    'run': run_str,
-                    'run_display': mst_dt.strftime("%I %p MST"),
-                    'fhr': fhr_str,
-                    'fhr_display': fhr_dt.strftime("%a %I %p MST"),
-                    'var': var_str,
-                    'var_display': VAR_DISPLAY.get(var_str, var_str.upper())
-                })
-    
-    if not map_data:
-        return "No map images found. Processing in progress..."
+                if date not in catalog:
+                    mst_dt = utc_to_mst(date, "00") # Use 00 as base for date label
+                    catalog[date] = {'label': mst_dt.strftime("%b %d, %Y"), 'runs': {}}
+                
+                if run not in catalog[date]['runs']:
+                    mst_run_dt = utc_to_mst(date, run)
+                    catalog[date]['runs'][run] = {'label': mst_run_dt.strftime("%I %p MST"), 'fhrs': set(), 'regions': set(), 'vars': set()}
+                
+                catalog[date]['runs'][run]['fhrs'].add(fhr)
+                catalog[date]['runs'][run]['regions'].add(region)
+                catalog[date]['runs'][run]['vars'].add(var)
 
-    # Sorting and grouping logic
-    def get_unique(key, display_key=None):
-        items = []
-        seen = set()
-        # Sort based on the key value
-        for m in sorted(map_data, key=lambda x: x[key], reverse=(key == 'date')):
-            if m[key] not in seen:
-                items.append({'id': m[key], 'label': m[display_key] if display_key else m[key]})
-                seen.add(m[key])
-        return items
+                # Store FHR display labels
+                mst_run_dt = utc_to_mst(date, run)
+                fhr_dt = mst_run_dt + timedelta(hours=int(fhr))
+                fhr_labels[fhr] = fhr_dt.strftime("%a %I %p MST")
 
-    regions = get_unique('region', 'region_display')
-    dates = get_unique('date', 'date_display')
-    runs = get_unique('run', 'run_display')
-    fhrs = sorted(list(set(m['fhr'] for m in map_data)))
-    vars_list = get_unique('var', 'var_display')
+    if not catalog:
+        return "No map images found."
+
+    # Sort dates descending
+    sorted_dates = sorted(catalog.keys(), reverse=True)
     
+    # Get initial values for first load
+    latest_date = sorted_dates[0]
+    # Sort runs chronologically by actual MST time
+    def run_sort_key(r):
+        dt = utc_to_mst(latest_date, r)
+        return dt.timestamp()
+        
+    available_runs = sorted(catalog[latest_date]['runs'].keys(), key=run_sort_key)
+    latest_run = available_runs[0]
+    
+    # Convert sets to sorted lists for JSON
+    for d in catalog:
+        for r in catalog[d]['runs']:
+            catalog[d]['runs'][r]['fhrs'] = sorted(list(catalog[d]['runs'][r]['fhrs']))
+            catalog[d]['runs'][r]['regions'] = sorted(list(catalog[d]['runs'][r]['regions']))
+            catalog[d]['runs'][r]['vars'] = sorted(list(catalog[d]['runs'][r]['vars']))
+
     return render_template('index.html', 
-                          regions=regions,
-                          dates=dates, 
-                          runs=runs, 
-                          fhrs=fhrs, 
-                          vars=vars_list, 
-                          map_data=map_data)
+                          catalog=catalog,
+                          sorted_dates=sorted_dates,
+                          fhr_labels=fhr_labels,
+                          var_display=VAR_DISPLAY,
+                          region_display=REGION_DISPLAY)
 
 @app.route('/api/value')
 def get_value():
+    # ... (same as before)
     date = request.args.get('date')
     run = request.args.get('run')
     fhr = request.args.get('fhr')
@@ -123,14 +127,12 @@ def get_value():
         return jsonify({'error': 'Invalid coordinates'}), 400
 
     file_path = os.path.join('data', f"{date}_{run}", f"aigfs.t{run}z.sfc.f{fhr}.grib2")
-    
     if not os.path.exists(file_path):
         return jsonify({'error': 'Data file not found'}), 404
 
     ds = None
     try:
-        ds = xr.open_dataset(file_path, engine='cfgrib', 
-                            backend_kwargs={'filter_by_keys': VAR_FILTERS[var]})
+        ds = xr.open_dataset(file_path, engine='cfgrib', backend_kwargs={'filter_by_keys': VAR_FILTERS[var]})
         actual_var = list(ds.data_vars)[0]
         value = ds[actual_var].sel(latitude=lat, longitude=lon, method='nearest').values
         final_value = UNIT_CONV[var](value)

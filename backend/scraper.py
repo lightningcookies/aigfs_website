@@ -40,12 +40,13 @@ def download_aigfs_data(date_str, run, forecast_hours):
 
 def get_latest_runs():
     """
-    Returns a list of the last 4 potential (date, run) tuples.
-    AIGFS runs at 00, 06, 12, 18 UTC.
+    Returns a list of the last 12 potential (date, run) tuples (72 hours).
+    This ensures that any gaps from server downtime are filled.
     """
     now = datetime.utcnow()
     runs = []
-    for i in range(4):
+    # Check the last 12 possible run times (3 days)
+    for i in range(12):
         check_time = now - timedelta(hours=i*6)
         run_hour = (check_time.hour // 6) * 6
         date_str = check_time.strftime("%Y%m%d")
