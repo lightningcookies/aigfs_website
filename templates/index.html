@@ -92,6 +92,11 @@
                     <span>Show City/Road Labels</span>
                 </div>
             </div>
+
+            <div class="control-group" id="legend-group">
+                <label>Color Scale</label>
+                <img id="legend-img" src="" alt="Legend" style="width: 100%; margin-top: 5px;">
+            </div>
         </div>
 
         <div id="map"></div>
@@ -175,6 +180,9 @@
             weatherOverlay.on('load', () => {
                 document.getElementById('loader').style.display = 'none';
                 document.getElementById('status-text').innerText = `Valid: ${fhrLabels[fhr] || 'F' + fhr}`;
+                
+                // Update Legend Image
+                document.getElementById('legend-img').src = `/static/maps/legend_${varName}.png`;
             });
             weatherOverlay.on('error', () => {
                 document.getElementById('loader').style.display = 'none';
@@ -200,7 +208,13 @@
                     if (data.error) {
                         document.getElementById('click-value').innerText = "N/A";
                     } else {
-                        const units = { 't2m': '°C', 'tp': 'mm', 'prmsl': 'hPa', 'u10': 'm/s', 'v10': 'm/s' };
+                        const units = { 
+                            't2m': '°F', 
+                            'tp': 'in', 
+                            'prmsl': 'hPa', 
+                            'u10': 'mph', 
+                            'v10': 'mph' 
+                        };
                         document.getElementById('click-value').innerText = data.value;
                         document.getElementById('var-unit').innerText = units[varName] || "";
                     }

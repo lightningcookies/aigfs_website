@@ -33,11 +33,11 @@ VAR_FILTERS = {
 }
 
 UNIT_CONV = {
-    't2m': lambda x: float(x) - 273.15,
+    't2m': lambda x: (float(x) - 273.15) * 9/5 + 32, # K to F
     'prmsl': lambda x: float(x) / 100.0,
-    'u10': lambda x: float(x),
-    'v10': lambda x: float(x),
-    'tp': lambda x: float(x)
+    'u10': lambda x: float(x) * 2.23694, # m/s to mph
+    'v10': lambda x: float(x) * 2.23694, # m/s to mph
+    'tp': lambda x: float(x) / 25.4 # mm to inches
 }
 
 def utc_to_mst(date_str, hour_str):

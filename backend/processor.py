@@ -26,31 +26,31 @@ VAR_CONFIG = {
     't2m': {
         'label': 'Temperature (2m)',
         'cmap': 'RdYlBu_r',
-        'levels': np.arange(-40, 51, 2), # 2-degree increments for better detail
-        'unit_conv': lambda x: x - 273.15,
-        'unit_label': '°C',
+        'levels': np.arange(-20, 111, 5), # Fahrenheit levels
+        'unit_conv': lambda x: (x - 273.15) * 9/5 + 32,
+        'unit_label': '°F',
         'filter': {'typeOfLevel': 'heightAboveGround', 'level': 2}
     },
     'u10': {
         'label': 'U Wind (10m)',
         'cmap': 'viridis',
-        'levels': np.arange(-50, 51, 5),
-        'unit_conv': lambda x: x,
-        'unit_label': 'm/s',
+        'levels': np.arange(-60, 61, 10), # mph levels
+        'unit_conv': lambda x: x * 2.23694,
+        'unit_label': 'mph',
         'filter': {'typeOfLevel': 'heightAboveGround', 'level': 10, 'shortName': 'u10'}
     },
     'v10': {
         'label': 'V Wind (10m)',
         'cmap': 'viridis',
-        'levels': np.arange(-50, 51, 5),
-        'unit_conv': lambda x: x,
-        'unit_label': 'm/s',
+        'levels': np.arange(-60, 61, 10), # mph levels
+        'unit_conv': lambda x: x * 2.23694,
+        'unit_label': 'mph',
         'filter': {'typeOfLevel': 'heightAboveGround', 'level': 10, 'shortName': 'v10'}
     },
     'prmsl': {
         'label': 'MSL Pressure',
         'cmap': 'coolwarm',
-        'levels': np.arange(960, 1051, 2), # 2hPa intervals for tighter detail
+        'levels': np.arange(960, 1051, 2),
         'unit_conv': lambda x: x / 100.0,
         'unit_label': 'hPa',
         'filter': {'shortName': 'prmsl'}
@@ -58,9 +58,10 @@ VAR_CONFIG = {
     'tp': {
         'label': 'Total Precipitation (6h)',
         'cmap': 'YlGnBu',
-        'levels': [0.1, 0.5, 1, 2, 5, 10, 15, 20, 25, 35, 50, 75, 100, 150, 200],
-        'unit_conv': lambda x: x,
-        'unit_label': 'mm',
+        # US style inches
+        'levels': [0.01, 0.05, 0.1, 0.25, 0.5, 0.75, 1, 1.5, 2, 3, 4, 5],
+        'unit_conv': lambda x: x / 25.4,
+        'unit_label': 'in',
         'filter': {'shortName': 'tp'}
     }
 }
@@ -140,11 +141,44 @@ def process_grib_file(file_path, output_dir, date_str=None):
                 if "filter_by_keys" not in str(e):
                     print(f"  ! Error on {region_name}/{var_key}: {e}")
 
+def generate_legends(output_dir):
+    """Generates standalone colorbar legends for each variable."""
+    print("--- Generating Color Legends ---")
+    for var_key, config in VAR_CONFIG.items():
+        out_path = os.path.join(output_dir, f"legend_{var_key}.png")
+        if os.path.exists(out_path):
+            continue
+
+        fig, ax = plt.subplots(figsize=(4, 0.8))
+        fig.subplots_adjust(bottom=0.5)
+
+        levels = config['levels']
+        cmap = plt.get_cmap(config['cmap'])
+        norm = mcolors.BoundaryNorm(levels, ncolors=cmap.N, extend='both')
+
+        cb = plt.colorbar(
+            plt.cm.ScalarMappable(norm=norm, cmap=cmap),
+            cax=ax,
+            orientation='horizontal',
+            ticks=levels[::2] if len(levels) > 10 else levels, # Tick density
+            label=f"{config['unit_label']}"
+        )
+        cb.ax.tick_params(labelsize=8, colors='white')
+        cb.set_label(config['unit_label'], color='white', size=9)
+        
+        # Make background transparent for the UI
+        plt.savefig(out_path, transparent=True, bbox_inches='tight', dpi=150)
+        plt.close(fig)
+        print(f"  > Created legend for {var_key}")
+
 def run_processor_service():
     print("--- AIGFS Regional Processor Service Started ---")
     data_dir = "data"
     output_dir = os.path.join("static", "maps")
     os.makedirs(output_dir, exist_ok=True)
+    
+    # Create legends on startup
+    generate_legends(output_dir)
 
     while True:
         processed_in_cycle = 0
