@@ -13,67 +13,68 @@ from datetime import datetime
 
 # Processing settings
 CLEANUP_GRIB = False
-REPROCESS = True     
-MAX_FILES_PER_CYCLE = 10 
-# SET THIS based on your core count. 4 is safe for 16GB.
+REPROCESS = False     
+MAX_FILES_PER_CYCLE = 20 
 MAX_WORKERS = min(4, cpu_count()) 
-MIN_FREE_RAM_GB = 2.0  # Safety buffer
+MIN_FREE_RAM_GB = 2.0
 
 # Region Definitions
 REGIONS = {
-    'global': {'extent': None, 'max_fhr': 384, 'dpi': 120},
+    'global': {'extent': [-180, 180, -90, 90], 'max_fhr': 384, 'dpi': 120},
     'conus': {'extent': [-125, -66, 23, 50], 'max_fhr': 168, 'dpi': 180},
     'west': {'extent': [-126, -103, 31, 50], 'max_fhr': 168, 'dpi': 220}
 }
 
-# Centralized configuration for standardized scales (Imperial Units)
+# --- NWS STYLE COLORMAPS ---
+# Official NWS Precipitation Colors
+NWS_PRECIP_COLORS = [
+    '#A6F28F', '#3DBA3D', '#166B16', '#1EB5EE', '#093BB3', 
+    '#D32BE2', '#FF00F5', '#FFBA00', '#FF0000', '#B50000', '#7F0000'
+]
+NWS_PRECIP_LEVELS = [0.01, 0.1, 0.25, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0, 8.0, 10.0]
+
+# NWS Temperature Colors (Vibrant bands)
+NWS_TEMP_COLORS = [
+    '#4B0082', '#8A2BE2', '#0000FF', '#4169E1', '#00BFFF', '#00FFFF', 
+    '#00FF00', '#32CD32', '#FFFF00', '#FFD700', '#FFA500', '#FF4500', 
+    '#FF0000', '#B22222', '#8B0000'
+]
+NWS_TEMP_LEVELS = np.arange(-40, 121, 10) # 10-degree bands for NWS look
+
 VAR_CONFIG = {
     't2m': {
-        'label': 'Temperature (2m)',
-        'cmap': 'RdYlBu_r',
-        'levels': np.arange(-20, 111, 5),
-        'unit_conv': lambda x: (x - 273.15) * 9/5 + 32,
-        'unit_label': '°F',
+        'label': 'Temperature (2m)', 
+        'cmap': mcolors.LinearSegmentedColormap.from_list('nws_temp', NWS_TEMP_COLORS),
+        'levels': np.arange(-40, 121, 2), # Smooth 2-degree interpolation
+        'unit_conv': lambda x: (x - 273.15) * 9/5 + 32, 'unit_label': '°F',
         'filter': {'typeOfLevel': 'heightAboveGround', 'level': 2}
     },
     'u10': {
-        'label': 'U Wind (10m)',
-        'cmap': 'viridis',
-        'levels': np.arange(-60, 61, 10),
-        'unit_conv': lambda x: x * 2.23694,
-        'unit_label': 'mph',
+        'label': 'U Wind (10m)', 'cmap': 'viridis', 'levels': np.arange(-60, 61, 10),
+        'unit_conv': lambda x: x * 2.23694, 'unit_label': 'mph',
         'filter': {'typeOfLevel': 'heightAboveGround', 'level': 10, 'shortName': 'u10'}
     },
     'v10': {
-        'label': 'V Wind (10m)',
-        'cmap': 'viridis',
-        'levels': np.arange(-60, 61, 10),
-        'unit_conv': lambda x: x * 2.23694,
-        'unit_label': 'mph',
+        'label': 'V Wind (10m)', 'cmap': 'viridis', 'levels': np.arange(-60, 61, 10),
+        'unit_conv': lambda x: x * 2.23694, 'unit_label': 'mph',
         'filter': {'typeOfLevel': 'heightAboveGround', 'level': 10, 'shortName': 'v10'}
     },
     'prmsl': {
-        'label': 'MSL Pressure',
-        'cmap': 'coolwarm',
-        'levels': np.arange(960, 1051, 2),
-        'unit_conv': lambda x: x / 100.0,
-        'unit_label': 'hPa',
+        'label': 'MSL Pressure', 'cmap': 'coolwarm', 'levels': np.arange(960, 1051, 2),
+        'unit_conv': lambda x: x / 100.0, 'unit_label': 'hPa',
         'filter': {'shortName': 'prmsl'}
     },
     'tp': {
-        'label': 'Total Precipitation (6h)',
-        'cmap': 'YlGnBu',
-        'levels': [0.01, 0.05, 0.1, 0.25, 0.5, 0.75, 1, 1.5, 2, 3, 4, 5],
-        'unit_conv': lambda x: x / 25.4,
-        'unit_label': 'in',
+        'label': 'Total Precipitation (6h)', 
+        'cmap': mcolors.ListedColormap(NWS_PRECIP_COLORS),
+        'levels': NWS_PRECIP_LEVELS,
+        'unit_conv': lambda x: x / 25.4, 'unit_label': 'in',
         'filter': {'shortName': 'tp'}
     }
 }
 
 def generate_map_task(args):
-    """Worker function to generate a single map."""
     file_path, output_dir, region_name, var_key, date_str, run, fhr_str = args
-    
     config = VAR_CONFIG[var_key]
     reg_config = REGIONS[region_name]
     out_filename = f"aigfs_{region_name}_{date_str}_{run}_{fhr_str}_{var_key}.png"
@@ -83,47 +84,34 @@ def generate_map_task(args):
         return False
 
     try:
-        # Check RAM safety before starting
         mem = psutil.virtual_memory()
-        if mem.available < (MIN_FREE_RAM_GB * 1024**3):
-            return "LOW_RAM"
+        if mem.available < (MIN_FREE_RAM_GB * 1024**3): return "LOW_RAM"
 
-        ds = xr.open_dataset(file_path, engine='cfgrib', 
-                            backend_kwargs={'filter_by_keys': config['filter']})
-        
+        ds = xr.open_dataset(file_path, engine='cfgrib', backend_kwargs={'filter_by_keys': config['filter']})
         actual_var = list(ds.data_vars)[0] if ds.data_vars else None
         if not actual_var:
             ds.close()
             return False
 
         data = config['unit_conv'](ds[actual_var])
+        data = data.assign_coords(longitude=(((data.longitude + 180) % 360) - 180)).sortby('longitude')
 
-        # Fix for Global Longitude Wrap (0-360 to -180-180)
-        if region_name == 'global':
-            data = data.assign_coords(longitude=(((data.longitude + 180) % 360) - 180)).sortby('longitude')
-
-        fig = plt.figure(figsize=(20, 10), frameon=False)
+        fig = plt.figure(figsize=(20, 10))
         ax = plt.axes([0, 0, 1, 1], projection=ccrs.PlateCarree())
         ax.set_axis_off()
 
         levels = config['levels']
-        norm = mcolors.BoundaryNorm(levels, ncolors=plt.get_cmap(config['cmap']).N, extend='both')
+        norm = mcolors.BoundaryNorm(levels, ncolors=config['cmap'].N if isinstance(config['cmap'], mcolors.Colormap) else 256, extend='both')
 
         if var_key == 'tp':
             data = data.where(data >= 0.01)
         
-        # Use pcolormesh for Global to ensure exact pixel-to-grid alignment
-        if region_name == 'global':
-            data.plot.pcolormesh(ax=ax, transform=ccrs.PlateCarree(), 
-                                cmap=config['cmap'], norm=norm, 
-                                add_colorbar=False, add_labels=False)
-            ax.set_extent([-180, 180, -90, 90], crs=ccrs.PlateCarree())
-        else:
-            data.plot.contourf(ax=ax, transform=ccrs.PlateCarree(), 
-                             levels=levels, cmap=config['cmap'], norm=norm, 
-                             add_colorbar=False, add_labels=False)
-            ax.set_extent(reg_config['extent'], crs=ccrs.PlateCarree())
+        # Grid-perfect alignment
+        data.plot.pcolormesh(ax=ax, transform=ccrs.PlateCarree(), 
+                            cmap=config['cmap'], norm=norm, 
+                            add_colorbar=False, add_labels=False)
         
+        ax.set_extent(reg_config['extent'], crs=ccrs.PlateCarree())
         plt.savefig(out_path, bbox_inches=0, pad_inches=0, transparent=True, dpi=reg_config['dpi'])
         
         plt.close(fig)
@@ -132,21 +120,19 @@ def generate_map_task(args):
         gc.collect()
         return True
     except Exception as e:
-        if "filter_by_keys" not in str(e):
-            print(f"  ! Error on {region_name}/{var_key}: {e}")
         return False
 
 def generate_legends(output_dir):
-    """Generates standalone colorbar legends for each variable."""
-    print("--- Generating Color Legends ---")
+    print("--- Generating NWS Style Color Legends ---")
     for var_key, config in VAR_CONFIG.items():
         out_path = os.path.join(output_dir, f"legend_{var_key}.png")
-        if os.path.exists(out_path): continue
-
+        # Always re-generate legends when colormaps change
         fig, ax = plt.subplots(figsize=(4, 0.8))
         fig.subplots_adjust(bottom=0.5)
         levels = config['levels']
-        cmap = plt.get_cmap(config['cmap'])
+        cmap = config['cmap']
+        if isinstance(cmap, str): cmap = plt.get_cmap(cmap)
+        
         norm = mcolors.BoundaryNorm(levels, ncolors=cmap.N, extend='both')
         cb = plt.colorbar(plt.cm.ScalarMappable(norm=norm, cmap=cmap), cax=ax, orientation='horizontal',
                          ticks=levels[::2] if len(levels) > 10 else levels, label=f"{config['unit_label']}")
@@ -156,7 +142,7 @@ def generate_legends(output_dir):
         plt.close(fig)
 
 def run_processor_service():
-    print(f"--- AIGFS Parallel Processor Service Started ({MAX_WORKERS} Workers) ---")
+    print(f"--- AIGFS NWS-Style Parallel Processor Service Started ---")
     data_dir = "data"
     output_dir = os.path.join("static", "maps")
     os.makedirs(output_dir, exist_ok=True)
@@ -178,29 +164,19 @@ def run_processor_service():
                     for region_name, reg_config in REGIONS.items():
                         if fhr_int <= reg_config['max_fhr']:
                             for var_key in VAR_CONFIG.keys():
-                                tasks.append((file_path, output_dir, region_name, var_key, date_str, run, fhr_str))
-                
-                if len(tasks) >= MAX_FILES_PER_CYCLE * 15: # Cap task list size
-                    break
+                                out_filename = f"aigfs_{region_name}_{date_str}_{run}_{fhr_str}_{var_key}.png"
+                                if not os.path.exists(os.path.join(output_dir, out_filename)) or REPROCESS:
+                                    tasks.append((file_path, output_dir, region_name, var_key, date_str, run, fhr_str))
+                if len(tasks) >= 100: break
+            if len(tasks) >= 100: break
         
         if tasks:
-            print(f"\n[Parallel Cycle] Processing {len(tasks)} map tasks...")
+            print(f"\n[Parallel Cycle] Processing {len(tasks)} new NWS-style map tasks...")
             with Pool(MAX_WORKERS) as pool:
                 results = pool.map(generate_map_task, tasks)
-            
-            new_maps = sum(1 for r in results if r is True)
-            low_ram_hits = sum(1 for r in results if r == "LOW_RAM")
-            
-            print(f"  > Cycle complete. New maps: {new_maps}")
-            if low_ram_hits > 0:
-                print(f"  ! WARNING: {low_ram_hits} tasks skipped due to low RAM.")
-
-            # Optional Cleanup (if enabled)
-            if CLEANUP_GRIB:
-                # Cleanup logic here...
-                pass
-
-        time.sleep(120 if tasks else 300)
+            print(f"  > Cycle complete. New maps: {sum(1 for r in results if r is True)}")
+        
+        time.sleep(60 if tasks else 300)
 
 if __name__ == "__main__":
     run_processor_service()
