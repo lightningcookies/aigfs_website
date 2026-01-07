@@ -141,6 +141,13 @@ def process_file(file_path):
                 index_path = f"{file_path}.{internal_name}.{os.getpid()}.idx"
                 ds = xr.open_dataset(file_path, engine='cfgrib', 
                                     backend_kwargs={'filter_by_keys': filter_keys, 'indexpath': index_path})
+                if not ds.data_vars:
+                    ds.close()
+                    if os.path.exists(index_path): os.remove(index_path)
+                    # excessive logging
+                    # print(f"Variable {internal_name} not found in {basename}")
+                    return
+
                 var = list(ds.data_vars)[0]
                 val = ds[var]
                 # Fix Longitude (0-360 -> -180-180)
@@ -149,7 +156,8 @@ def process_file(file_path):
                 ds.close()
                 if os.path.exists(index_path): os.remove(index_path)
             except Exception as e:
-                print(f"Failed to load {internal_name}: {e}")
+                # print(f"Failed to load {internal_name}: {e}")
+                pass
 
         # Load T2M, TP, PRMSL
         load_var(VAR_CONFIG['t2m']['filter'], 't2m')
