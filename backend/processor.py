@@ -155,7 +155,7 @@ def process_file(file_path):
                 ds.close()
                 if os.path.exists(index_path): os.remove(index_path)
             except Exception as e:
-                print(f"Failed to load {internal_name}: {e}")
+                # print(f"Failed to load {internal_name}: {e}")
                 pass
 
         # Load T2M, TP, PRMSL
@@ -174,7 +174,7 @@ def process_file(file_path):
             data_cache['wind_speed'] = data_cache['wind_speed'].assign_coords(latitude=data_cache['u10'].latitude, longitude=data_cache['u10'].longitude)
 
         if not data_cache:
-            print(f"Skipping {basename}: No variables loaded!")
+            # print(f"Skipping {basename}: No variables loaded!")
             return True
 
         # 2. Generate Maps
@@ -193,34 +193,33 @@ def process_file(file_path):
             x_min = lon_min
             x_max = lon_max
             
-            # Aspect ratio of the box in Mercator space
-            aspect = (x_max - x_min) / np.rad2deg(y_max_merc - y_min_merc) # Approx since x is deg, y is rad-like... wait. 
-            # Mercator X is just Lon (in radians normally, but here we treat degree scaling).
-            # Let's stick to simple:
-            # Mercator Projection: x = lon, y = ln(tan(pi/4 + lat/2))
-            # If lon is in degrees, we should scale y similarly or just map interpolation range.
-            # We just need the TARGET LATITUDES to be spaced such that they correspond to linear Mercator Y.
+            # Aspect Ratio Calculation
+            merc_h = y_max_merc - y_min_merc
+            merc_w = np.deg2rad(lon_max - lon_min)
+            aspect = merc_w / merc_h
+            W = int(H * aspect)
+
+            # Generate Grid Coordinates at Pixel Centers (Half-Pixel Correction)
+            # Leaflet stretches the image from Edge to Edge. We should sample the center of each pixel.
+            dy = merc_h / H
+            dx = (lon_max - lon_min) / W
             
-            # Target Y grid (linear in Mercator space)
-            target_merc_y = np.linspace(y_max_merc, y_min_merc, H) # Top to Bottom
+            # Y goes Top to Bottom
+            target_merc_y = np.linspace(y_max_merc - dy/2, y_min_merc + dy/2, H)
             target_lat = mercator_y_to_lat(target_merc_y)
             
-            # Target X grid (linear in Longitude, which is linear in Mercator)
-            W = int(H * abs((lon_max - lon_min) / (np.rad2deg(y_max_merc - y_min_merc))))
-            if W > 2500: W = 2500 # Cap width
-            target_lon = np.linspace(lon_min, lon_max, W)
-
+            # X goes Left to Right
+            target_lon = np.linspace(lon_min + dx/2, lon_max - dx/2, W)
+            
             for var_key, config in VAR_CONFIG.items():
                 out_filename = f"aigfs_{reg_name}_{date_str}_{run}_{fhr_str}_{var_key}.png"
                 out_path = os.path.join(output_dir, out_filename)
                 json_path = out_path.replace('.png', '.json')
 
                 if not REPROCESS and os.path.exists(out_path):
-                    # print(f"Skipping {out_filename} (Exists)")
                     continue
 
                 if config['key'] not in data_cache:
-                    print(f"Skipping {var_key}: Missing in cache")
                     continue
                 
                 # SPECIAL CASE: Wind Speed needs u10 and v10, which might be missing in long-range forecasts
@@ -237,7 +236,6 @@ def process_file(file_path):
                 # Data is sorted by lat (Ascending), so slice must be min -> max
                 data_crop = data.sel(latitude=slice(lat_min - 1, lat_max + 1), longitude=slice(lon_min - 1, lon_max + 1))
                 if data_crop.size == 0:
-                    print(f"Skipping {var_key}: Crop empty {lat_min}-{lat_max} {lon_min}-{lon_max}")
                     continue
 
                 # Interpolate to Web Mercator Grid
