@@ -216,9 +216,11 @@ def process_file(file_path):
                 json_path = out_path.replace('.png', '.json')
 
                 if not REPROCESS and os.path.exists(out_path):
+                    # print(f"Skipping {out_filename} (Exists)")
                     continue
 
                 if config['key'] not in data_cache:
+                    print(f"Skipping {var_key}: Missing in cache")
                     continue
                 
                 # SPECIAL CASE: Wind Speed needs u10 and v10, which might be missing in long-range forecasts
@@ -232,8 +234,11 @@ def process_file(file_path):
                 
                 # Crop first to reduce interpolation cost (loose crop)
                 # Add buffer for interpolation
-                data_crop = data.sel(latitude=slice(lat_max + 1, lat_min - 1), longitude=slice(lon_min - 1, lon_max + 1))
-                if data_crop.size == 0: continue
+                # Data is sorted by lat (Ascending), so slice must be min -> max
+                data_crop = data.sel(latitude=slice(lat_min - 1, lat_max + 1), longitude=slice(lon_min - 1, lon_max + 1))
+                if data_crop.size == 0:
+                    print(f"Skipping {var_key}: Crop empty {lat_min}-{lat_max} {lon_min}-{lon_max}")
+                    continue
 
                 # Interpolate to Web Mercator Grid
                 # xarray interp: latitude must be monotonic. 
