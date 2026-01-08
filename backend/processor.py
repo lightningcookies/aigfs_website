@@ -173,13 +173,26 @@ def process_file(file_path):
 
                 # PLOTTING
                 # Figure setup: We want high-res output
-                # DPI 100, Size 10x10 -> 1000px
-                fig = plt.figure(figsize=(10, 10), dpi=100)
+                # Calculate precise aspect ratio to prevent whitespace
+                proj = ccrs.Mercator.GOOGLE
+                # We need to compute the extent in projected coordinates to get aspect ratio
+                # transform points
+                # SouthWest
+                p0 = proj.transform_point(lon_min, lat_min, ccrs.PlateCarree())
+                # NorthEast
+                p1 = proj.transform_point(lon_max, lat_max, ccrs.PlateCarree())
                 
-                # Projection: Google Web Mercator (matches Leaflet)
-                ax = plt.axes(projection=ccrs.Mercator.GOOGLE)
+                # Aspect Ratio = Width / Height
+                aspect = (p1[0] - p0[0]) / (p1[1] - p0[1])
                 
-                # Set Extent: This is the critical part for alignment
+                # Base width 10 inches -> Height = 10 / aspect
+                # DPI 100 -> Width 1000px
+                fig = plt.figure(figsize=(10, 10 / aspect), dpi=100)
+                
+                # Create axes filling the entire figure (0,0,1,1)
+                ax = plt.axes([0, 0, 1, 1], projection=proj)
+                
+                # Set Extent
                 ax.set_extent([lon_min, lon_max, lat_min, lat_max], crs=ccrs.PlateCarree())
                 
                 # Colormap setup
@@ -198,10 +211,6 @@ def process_file(file_path):
                 
                 # Special handling for Precip (Alpha)
                 if var_key == 'tp':
-                    # pcolormesh doesn't support alpha per-pixel easily with arrays, but we can use the colormap
-                    # Or simple masking: mask values < 0.01
-                    # Cartopy pcolormesh creates a collection.
-                    # Better approach: Mask the data before plotting?
                     # Masked array:
                     masked_data = np.ma.masked_less(data_crop.values, 0.01)
                     ax.clear() # Clear the previous unmasked plot
@@ -212,11 +221,10 @@ def process_file(file_path):
                                         cmap=cmap, norm=norm, shading='auto')
                 else:
                      # Global transparency for other layers
-                     # pcolormesh supports alpha=...
                      mesh.set_alpha(0.7)
 
-                # Save tightly
-                plt.savefig(out_path, transparent=True, bbox_inches='tight', pad_inches=0, dpi=100)
+                # Save with no padding
+                plt.savefig(out_path, transparent=True, dpi=100)
                 plt.close(fig)
                 
                 # Save Stats
