@@ -7,22 +7,22 @@ import time
 import gc
 import psutil
 import json
+import cartopy.crs as ccrs
+import cartopy.feature as cfeature
 from multiprocessing import Pool, cpu_count
 from datetime import datetime
-from PIL import Image
 
 # Processing settings
 CLEANUP_GRIB = False
 REPROCESS = False     
 MAX_WORKERS = 1  # SERIAL PROCESSING ONLY to save RAM
-MIN_FREE_RAM_GB = 0.5 # 500MB buffer is enough for single thread
+MIN_FREE_RAM_GB = 0.5 
 
 # Region Definitions (Strict Lat/Lon Boxes)
-# Updated for Web Mercator (Global max lat ~85) and Extended Pacific
 REGIONS = {
     'global': {'extent': [-180, 180, -85, 85], 'max_fhr': 384},
-    'conus': {'extent': [-135, -60, 20, 55], 'max_fhr': 168}, # Extended West into Pacific
-    'west': {'extent': [-145, -100, 25, 50], 'max_fhr': 168}  # Extended West into Pacific
+    'conus': {'extent': [-135, -60, 20, 55], 'max_fhr': 168},
+    'west': {'extent': [-145, -100, 25, 50], 'max_fhr': 168}
 }
 
 # NWS Style Color Configs
@@ -35,8 +35,7 @@ NWS_TEMP_COLORS = ['#4B0082', '#8A2BE2', '#0000FF', '#4169E1', '#00BFFF', '#00FF
 NWS_PRESSURE_COLORS = ['#0000FF', '#4169E1', '#00BFFF', '#E0FFFF', '#FFFFE0', '#FFD700', '#FF8C00', '#FF0000', '#8B0000']
 PRESSURE_LEVELS = np.arange(960, 1060, 4)
 
-# Wind Speed Colors (NWS-ish)
-# Added padding colors for <0 (impossible) and >100 (extreme) to match BoundaryNorm bins
+# Wind Speed Colors
 WIND_COLORS = ['#FFFFFF', '#E0E0E0', '#B0C4DE', '#87CEFA', '#00BFFF', '#1E90FF', '#0000FF', '#8A2BE2', '#DA70D6', '#FF00FF', '#FF1493', '#8B0000', '#4B0000']
 WIND_LEVELS = [0, 5, 10, 15, 20, 25, 30, 40, 50, 60, 80, 100]
 
@@ -45,7 +44,7 @@ VAR_CONFIG = {
         'cmap': mcolors.LinearSegmentedColormap.from_list('nws_temp', NWS_TEMP_COLORS),
         'levels': np.arange(-40, 121, 2), 
         'unit_conv': lambda x: (x - 273.15) * 9/5 + 32, 'unit_label': '°F',
-        'key': 't2m', # Internal key to look for in loaded dataset
+        'key': 't2m', 
         'filter': {'typeOfLevel': 'heightAboveGround', 'level': 2}
     },
     'tp': {
@@ -66,28 +65,12 @@ VAR_CONFIG = {
         'cmap': mcolors.ListedColormap(WIND_COLORS), 
         'levels': WIND_LEVELS, 
         'unit_conv': lambda x: x * 2.23694, 'unit_label': 'mph',
-        'key': 'wind_speed', # Calculated
-        'filter': {'typeOfLevel': 'heightAboveGround', 'level': 10} # Needs u10 and v10
+        'key': 'wind_speed', 
+        'filter': {'typeOfLevel': 'heightAboveGround', 'level': 10} 
     }
 }
 
-def lat_to_mercator_y(lat):
-    """Convert latitude to Web Mercator Y."""
-    lat_rad = np.deg2rad(lat)
-    return np.log(np.tan(np.pi / 4 + lat_rad / 2))
-
-def mercator_y_to_lat(y):
-    """Convert Web Mercator Y to latitude."""
-    return np.rad2deg(2 * np.arctan(np.exp(y)) - np.pi / 2)
-
 def process_file(file_path):
-    """
-    Process a single GRIB file:
-    1. Load all variables.
-    2. Compute derived variables (Wind).
-    3. Generate maps for all regions and variables.
-    4. Save stats.
-    """
     try:
         # Check memory
         mem = psutil.virtual_memory()
@@ -95,20 +78,15 @@ def process_file(file_path):
             print("Skipping due to low RAM")
             return False
 
-        # Parse filename info
-        # aigfs.t12z.sfc.f006.grib2
         basename = os.path.basename(file_path)
         parts = basename.split('.')
         run = parts[1][1:3]
         fhr_str = parts[3][1:]
         fhr_int = int(fhr_str)
-        
-        # Get date from directory name: data/20231027_12/...
         date_str = os.path.basename(os.path.dirname(file_path)).split('_')[0]
-        
         output_dir = os.path.join("static", "maps")
         
-        # Determine needed tasks to skip loading if all done
+        # Determine needed tasks
         tasks_needed = False
         for reg_name, reg_cfg in REGIONS.items():
             if fhr_int > reg_cfg['max_fhr']: continue
@@ -120,23 +98,13 @@ def process_file(file_path):
                     break
         
         if not tasks_needed:
-            # print(f"Skipping {basename} (Already done)")
             return True
 
         print(f"Processing {basename}...")
         
-        # Open Dataset with cfgrib
-        # We load specific variables to save memory, but we need multiple messages.
-        # Efficient way: open once, select variables.
-        # Note: cfgrib can be slow with filters on large files. 
-        # We'll try opening with specific backend_kwargs for each if needed, 
-        # or just open generic and select. 
-        # Strategy: Open per variable group to ensure we get the right messages.
-        
         # 1. Load Data
         data_cache = {}
         
-        # Helper to load a var
         def load_var(filter_keys, internal_name):
             try:
                 index_path = f"{file_path}.{internal_name}.{os.getpid()}.idx"
@@ -149,68 +117,34 @@ def process_file(file_path):
 
                 var = list(ds.data_vars)[0]
                 val = ds[var]
-                # Fix Longitude (0-360 -> -180-180)
+                # Fix Longitude: GFS is 0-360. Cartopy handles this, BUT standardizing to -180/180 is safer for cropping.
                 val = val.assign_coords(longitude=(((val.longitude + 180) % 360) - 180)).sortby(['latitude', 'longitude'])
                 data_cache[internal_name] = val
                 ds.close()
                 if os.path.exists(index_path): os.remove(index_path)
             except Exception as e:
-                # print(f"Failed to load {internal_name}: {e}")
                 pass
 
-        # Load T2M, TP, PRMSL
         load_var(VAR_CONFIG['t2m']['filter'], 't2m')
         load_var(VAR_CONFIG['tp']['filter'], 'tp')
         load_var(VAR_CONFIG['prmsl']['filter'], 'prmsl')
-        
-        # Load U/V for Wind
         load_var({'typeOfLevel': 'heightAboveGround', 'level': 10, 'shortName': 'u10'}, 'u10')
         load_var({'typeOfLevel': 'heightAboveGround', 'level': 10, 'shortName': 'v10'}, 'v10')
 
-        # Compute Wind Speed
         if 'u10' in data_cache and 'v10' in data_cache:
             data_cache['wind_speed'] = np.sqrt(data_cache['u10']**2 + data_cache['v10']**2)
-            # Copy coords from u10
             data_cache['wind_speed'] = data_cache['wind_speed'].assign_coords(latitude=data_cache['u10'].latitude, longitude=data_cache['u10'].longitude)
 
         if not data_cache:
-            # print(f"Skipping {basename}: No variables loaded!")
             return True
 
-        # 2. Generate Maps
+        # 2. Generate Maps with Cartopy
         generated_count = 0
         for reg_name, reg_cfg in REGIONS.items():
             if fhr_int > reg_cfg['max_fhr']: continue
             
             lon_min, lon_max, lat_min, lat_max = reg_cfg['extent']
 
-            # Create Target Web Mercator Grid
-            # We want ~1000px height for quality
-            H = 1000
-            # Aspect ratio based on mercator bounds
-            y_min_merc = lat_to_mercator_y(lat_min)
-            y_max_merc = lat_to_mercator_y(lat_max)
-            x_min = lon_min
-            x_max = lon_max
-            
-            # Aspect Ratio Calculation
-            merc_h = y_max_merc - y_min_merc
-            merc_w = np.deg2rad(lon_max - lon_min)
-            aspect = merc_w / merc_h
-            W = int(H * aspect)
-
-            # Generate Grid Coordinates at Pixel Centers (Half-Pixel Correction)
-            # Leaflet stretches the image from Edge to Edge. We should sample the center of each pixel.
-            dy = merc_h / H
-            dx = (lon_max - lon_min) / W
-            
-            # Y goes Top to Bottom
-            target_merc_y = np.linspace(y_max_merc - dy/2, y_min_merc + dy/2, H)
-            target_lat = mercator_y_to_lat(target_merc_y)
-            
-            # X goes Left to Right
-            target_lon = np.linspace(lon_min + dx/2, lon_max - dx/2, W)
-            
             for var_key, config in VAR_CONFIG.items():
                 out_filename = f"aigfs_{reg_name}_{date_str}_{run}_{fhr_str}_{var_key}.png"
                 out_path = os.path.join(output_dir, out_filename)
@@ -218,68 +152,79 @@ def process_file(file_path):
 
                 if not REPROCESS and os.path.exists(out_path):
                     continue
-
                 if config['key'] not in data_cache:
                     continue
-                
-                # SPECIAL CASE: Wind Speed needs u10 and v10, which might be missing in long-range forecasts
                 if config['key'] == 'wind_speed' and 'wind_speed' not in data_cache:
                     continue
 
                 raw_data = data_cache[config['key']]
-
-                # Unit Conversion
                 data = config['unit_conv'](raw_data)
-                
-                # Crop first to reduce interpolation cost (loose crop)
-                # Add buffer for interpolation
-                # Data is sorted by lat (Ascending), so slice must be min -> max
-                data_crop = data.sel(latitude=slice(lat_min - 1, lat_max + 1), longitude=slice(lon_min - 1, lon_max + 1))
-                if data_crop.size == 0:
-                    continue
 
-                # Interpolate to Web Mercator Grid
-                # xarray interp: latitude must be monotonic. 
-                # target_lat is descending (Top to Bottom), data_crop.latitude is usually descending too.
-                data_interp = data_crop.interp(latitude=target_lat, longitude=target_lon, method='linear')
+                # Loose crop to speed up plotting (add buffer)
+                data_crop = data.sel(latitude=slice(lat_min - 2, lat_max + 2), longitude=slice(lon_min - 2, lon_max + 2))
+                if data_crop.size == 0: continue
 
-                # Calculate Stats (Min/Max)
-                valid_values = data_interp.values[~np.isnan(data_interp.values)]
-                if len(valid_values) == 0:
-                    min_val, max_val = 0, 0
+                # Stats Calculation
+                valid_vals = data_crop.values[~np.isnan(data_crop.values)]
+                if len(valid_vals) > 0:
+                    min_val, max_val = float(np.min(valid_vals)), float(np.max(valid_vals))
                 else:
-                    min_val = float(np.min(valid_values))
-                    max_val = float(np.max(valid_values))
+                    min_val, max_val = 0.0, 0.0
 
-                # Apply Colormap
+                # PLOTTING
+                # Figure setup: We want high-res output
+                # DPI 100, Size 10x10 -> 1000px
+                fig = plt.figure(figsize=(10, 10), dpi=100)
+                
+                # Projection: Google Web Mercator (matches Leaflet)
+                ax = plt.axes(projection=ccrs.Mercator.GOOGLE)
+                
+                # Set Extent: This is the critical part for alignment
+                ax.set_extent([lon_min, lon_max, lat_min, lat_max], crs=ccrs.PlateCarree())
+                
+                # Colormap setup
                 cmap = config['cmap']
                 if isinstance(cmap, str): cmap = plt.get_cmap(cmap)
                 norm = mcolors.BoundaryNorm(config['levels'], ncolors=cmap.N, extend='both')
+
+                # Plot Data
+                # transform=ccrs.PlateCarree() tells Cartopy the data is Lat/Lon
+                mesh = ax.pcolormesh(data_crop.longitude, data_crop.latitude, data_crop.values, 
+                                     transform=ccrs.PlateCarree(),
+                                     cmap=cmap, norm=norm, shading='auto')
+
+                # Hide Axes/Borders completely
+                ax.axis('off')
                 
-                rgba_data = cmap(norm(data_interp.values))
-                
-                # Masking/Alpha
+                # Special handling for Precip (Alpha)
                 if var_key == 'tp':
-                    rgba_data[data_interp.values < 0.01, 3] = 0
+                    # pcolormesh doesn't support alpha per-pixel easily with arrays, but we can use the colormap
+                    # Or simple masking: mask values < 0.01
+                    # Cartopy pcolormesh creates a collection.
+                    # Better approach: Mask the data before plotting?
+                    # Masked array:
+                    masked_data = np.ma.masked_less(data_crop.values, 0.01)
+                    ax.clear() # Clear the previous unmasked plot
+                    ax.axis('off')
+                    ax.set_extent([lon_min, lon_max, lat_min, lat_max], crs=ccrs.PlateCarree())
+                    mesh = ax.pcolormesh(data_crop.longitude, data_crop.latitude, masked_data,
+                                        transform=ccrs.PlateCarree(),
+                                        cmap=cmap, norm=norm, shading='auto')
                 else:
-                    # Make 'no data' or masked areas transparent? 
-                    # Usually just valid data. 
-                    # If wind is 0, maybe transparent? No, user wants to see low wind.
-                    # Just setting alpha for overlay
-                    rgba_data[..., 3] = 0.7 
-                    # Optional: Mask very low wind? No.
+                     # Global transparency for other layers
+                     # pcolormesh supports alpha=...
+                     mesh.set_alpha(0.7)
 
-                # Save Image
-                img = Image.fromarray((rgba_data * 255).astype(np.uint8))
-                img.save(out_path, "PNG")
-
+                # Save tightly
+                plt.savefig(out_path, transparent=True, bbox_inches='tight', pad_inches=0, dpi=100)
+                plt.close(fig)
+                
                 # Save Stats
                 with open(json_path, 'w') as jf:
                     json.dump({'min': min_val, 'max': max_val, 'unit': config['unit_label']}, jf)
-                
+
                 generated_count += 1
         
-        # Cleanup
         del data_cache
         gc.collect()
         if generated_count > 0:
@@ -307,15 +252,12 @@ def generate_legends(output_dir):
         plt.close(fig)
 
 def run_processor_service():
-    print(f"--- AIGFS Raster Processor Started ({MAX_WORKERS} Workers) ---")
-    print(f"CWD: {os.getcwd()}")
+    print(f"--- AIGFS Raster Processor (Cartopy) Started ({MAX_WORKERS} Workers) ---")
     data_dir, output_dir = "data", os.path.join("static", "maps")
-    print(f"Output Dir: {os.path.abspath(output_dir)}")
     os.makedirs(output_dir, exist_ok=True)
     generate_legends(output_dir)
 
     while True:
-        # Scan for files
         files_to_process = []
         for root, dirs, files in os.walk(data_dir):
             for f in sorted(files):
@@ -324,12 +266,9 @@ def run_processor_service():
         
         if files_to_process:
             print(f"\n[Parallel Cycle] Scanning {len(files_to_process)} files...")
-            # We use map_async or map to process files in parallel.
-            # Each worker handles one file completely (Opening once).
             with Pool(MAX_WORKERS) as pool:
                 pool.map(process_file, files_to_process)
         
-        # Cleanup orphan index files
         for root, dirs, files in os.walk(data_dir):
             for f in files:
                 if f.endswith('.idx') and not os.path.exists(os.path.join(root, f.replace('.idx', ''))):
