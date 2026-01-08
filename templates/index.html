@@ -163,7 +163,12 @@
 
             const filename = `aigfs_${region}_${date}_${run}_${fhr}_${varName}.png`;
             const imageUrl = `/static/maps/${filename}`;
-            const BOUNDS = { 'global': [[-90, -180], [90, 180]], 'conus': [[23, -125], [50, -66]], 'west': [[31, -126], [50, -103]] };
+            // BOUNDS must match backend REGIONS exactly. [South, West], [North, East]
+            const BOUNDS = { 
+                'global': [[-85, -180], [85, 180]], 
+                'conus': [[20, -135], [55, -60]], 
+                'west': [[25, -145], [50, -100]] 
+            };
 
             document.getElementById('loader').style.display = 'inline';
             if (weatherOverlay) map.removeLayer(weatherOverlay);
