@@ -155,7 +155,7 @@ def process_file(file_path):
                 ds.close()
                 if os.path.exists(index_path): os.remove(index_path)
             except Exception as e:
-                # print(f"Failed to load {internal_name}: {e}")
+                print(f"Failed to load {internal_name}: {e}")
                 pass
 
         # Load T2M, TP, PRMSL
@@ -172,6 +172,10 @@ def process_file(file_path):
             data_cache['wind_speed'] = np.sqrt(data_cache['u10']**2 + data_cache['v10']**2)
             # Copy coords from u10
             data_cache['wind_speed'] = data_cache['wind_speed'].assign_coords(latitude=data_cache['u10'].latitude, longitude=data_cache['u10'].longitude)
+
+        if not data_cache:
+            print(f"Skipping {basename}: No variables loaded!")
+            return True
 
         # 2. Generate Maps
         generated_count = 0
