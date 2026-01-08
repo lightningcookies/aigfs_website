@@ -14,8 +14,8 @@ from PIL import Image
 # Processing settings
 CLEANUP_GRIB = False
 REPROCESS = False     
-MAX_WORKERS = 1  # Reduced from 4 to 1 to save RAM
-MIN_FREE_RAM_GB = 0.5  # Lower threshold since we are running serially
+MAX_WORKERS = 1  # SERIAL PROCESSING ONLY to save RAM
+MIN_FREE_RAM_GB = 0.5 # 500MB buffer is enough for single thread
 
 # Region Definitions (Strict Lat/Lon Boxes)
 # Updated for Web Mercator (Global max lat ~85) and Extended Pacific

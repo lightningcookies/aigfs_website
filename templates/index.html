@@ -7,14 +7,14 @@
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <style>
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; padding: 0; background-color: #1a1a1a; color: white; }
-        .header { background: #333; padding: 10px 20px; display: flex; align-items: center; justify-content: space-between; box-shadow: 0 2px 5px rgba(0,0,0,0.5); z-index: 2000; position: relative; }
+        .header { background: #333; padding: 10px 20px; display: flex; align-items: center; justify-content: space-between; box-shadow: 0 2px 5px rgba(0,0,0,0.5); }
         h1 { margin: 0; font-size: 1.2em; }
         .layout { display: flex; height: calc(100vh - 50px); }
-        .sidebar { width: 300px; background: #222; padding: 20px; overflow-y: auto; box-shadow: 2px 0 5px rgba(0,0,0,0.3); z-index: 1500; }
+        .sidebar { width: 300px; background: #222; padding: 20px; overflow-y: auto; box-shadow: 2px 0 5px rgba(0,0,0,0.3); }
         .control-group { margin-bottom: 20px; }
         label { display: block; font-size: 0.8em; font-weight: bold; margin-bottom: 5px; color: #aaa; text-transform: uppercase; }
         select { width: 100%; padding: 10px; background: #333; color: white; border: 1px solid #444; border-radius: 4px; font-size: 1em; }
-        #map { flex-grow: 1; background: #000; z-index: 1; }
+        #map { flex-grow: 1; background: #000; }
         .info-panel { position: absolute; bottom: 20px; right: 20px; background: rgba(0,0,0,0.8); padding: 15px; border-radius: 8px; border: 1px solid #444; z-index: 1000; pointer-events: none; }
         .value-display { font-size: 2em; font-weight: bold; color: #00ffcc; }
         .coords { font-size: 0.8em; color: #888; }
@@ -23,20 +23,6 @@
         button:hover { background: #555; }
         .toggle-group { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
         #loader { display: none; margin-left: 10px; font-size: 0.8em; color: #00ffcc; }
-        .stats-box { margin-top: 10px; padding: 10px; background: #333; border-radius: 4px; font-size: 0.9em; }
-        .stat-row { display: flex; justify-content: space-between; margin-bottom: 5px; }
-        .stat-label { color: #aaa; }
-        .stat-val { font-weight: bold; color: #fff; }
-
-        @media (max-width: 768px) {
-            .layout { flex-direction: column-reverse; height: auto; }
-            .sidebar { width: auto; max-height: 40vh; }
-            #map { height: 60vh; }
-            .header { padding: 10px; }
-            h1 { font-size: 1em; }
-            .info-panel { bottom: 10px; right: 10px; padding: 10px; }
-            .value-display { font-size: 1.5em; }
-        }
     </style>
 </head>
 <body>
@@ -95,16 +81,6 @@
             <div class="control-group" id="legend-group">
                 <label>Color Scale</label>
                 <img id="legend-img" src="" alt="Legend" style="width: 100%; margin-top: 5px;">
-                <div id="stats-container" class="stats-box" style="display: none;">
-                    <div class="stat-row">
-                        <span class="stat-label">Min:</span>
-                        <span class="stat-val" id="stat-min">--</span>
-                    </div>
-                    <div class="stat-row">
-                        <span class="stat-label">Max:</span>
-                        <span class="stat-val" id="stat-max">--</span>
-                    </div>
-                </div>
             </div>
         </div>
 
@@ -144,15 +120,11 @@
                 }
                 select.appendChild(opt);
             });
-            // Try to keep selection if valid
-            if (items.includes(currentVal) || items.some(i => i.id === currentVal)) {
-                select.value = currentVal;
-            }
+            if (items.includes(currentVal)) select.value = currentVal;
         }
 
         function onDateChange() {
             const date = document.getElementById('date-select').value;
-            if (!catalog[date]) return;
             const runs = Object.keys(catalog[date].runs).sort((a,b) => a.localeCompare(b));
             const runItems = runs.map(r => ({ id: r, label: catalog[date].runs[r].label }));
             populateSelect('run-select', runItems);
@@ -162,13 +134,12 @@
         function onRunChange() {
             const date = document.getElementById('date-select').value;
             const run = document.getElementById('run-select').value;
-            if (!catalog[date] || !catalog[date].runs[run]) return;
             const runData = catalog[date].runs[run];
             
             populateSelect('region-select', runData.regions, regionDisplay);
             populateSelect('var-select', runData.vars, varDisplay);
             
-            const fhrItems = runData.fhrs.map(f => ({ id: f, label: fhrLabels[f] || 'F' + f }));
+            const fhrItems = runData.fhrs.map(f => ({ id: f, label: 'F' + f }));
             populateSelect('fhr-select', fhrItems);
             
             updateMap();
@@ -179,19 +150,7 @@
             else map.removeLayer(labelsLayer);
         }
 
-        // Updated Bounds to match backend logic
-        const REGION_VIEWS = { 
-            'global': { center: [20, 0], zoom: 3 }, 
-            'conus': { center: [39, -98], zoom: 4 }, 
-            'west': { center: [40, -120], zoom: 5 } 
-        };
-        
-        // Bounds: [[South, West], [North, East]]
-        const BOUNDS = { 
-            'global': [[-85, -180], [85, 180]], 
-            'conus': [[20, -135], [55, -60]], 
-            'west': [[25, -145], [50, -100]] 
-        };
+        const REGION_VIEWS = { 'global': { center: [20, 0], zoom: 3 }, 'conus': { center: [39, -98], zoom: 4 }, 'west': { center: [40, -114], zoom: 5 } };
 
         function updateMap(regionChanged = false) {
             const date = document.getElementById('date-select').value;
@@ -200,48 +159,24 @@
             const varName = document.getElementById('var-select').value;
             const fhr = document.getElementById('fhr-select').value;
             
-            if (!date || !run || !region || !varName || !fhr) return;
-
             if (regionChanged && REGION_VIEWS[region]) map.flyTo(REGION_VIEWS[region].center, REGION_VIEWS[region].zoom);
 
             const filename = `aigfs_${region}_${date}_${run}_${fhr}_${varName}.png`;
             const imageUrl = `/static/maps/${filename}`;
-            const statsUrl = `/static/maps/${filename.replace('.png', '.json')}`;
+            const BOUNDS = { 'global': [[-90, -180], [90, 180]], 'conus': [[23, -125], [50, -66]], 'west': [[31, -126], [50, -103]] };
 
             document.getElementById('loader').style.display = 'inline';
             if (weatherOverlay) map.removeLayer(weatherOverlay);
-            
-            // Note: Bounds must match the extent used in generation
             weatherOverlay = L.imageOverlay(imageUrl, BOUNDS[region] || BOUNDS['global'], { opacity: 0.6 }).addTo(map);
             
             weatherOverlay.on('load', () => {
                 document.getElementById('loader').style.display = 'none';
                 document.getElementById('status-text').innerText = `Valid: ${fhrLabels[fhr] || 'F' + fhr}`;
                 document.getElementById('legend-img').src = `/static/maps/legend_${varName}.png`;
-                
-                // Fetch Stats
-                fetch(statsUrl)
-                    .then(r => r.json())
-                    .then(data => {
-                        document.getElementById('stats-container').style.display = 'block';
-                        document.getElementById('stat-min').innerText = `${Math.round(data.min)} ${data.unit}`;
-                        // Only show Max for Precip? No, plan said "Same goes for Precipitation except only the max is needed."
-                        // Task 8: "Same goes for Precipitation except only the max is needed."
-                        if (varName === 'tp') {
-                             document.getElementById('stat-min').parentElement.style.display = 'none';
-                        } else {
-                             document.getElementById('stat-min').parentElement.style.display = 'flex';
-                        }
-                        document.getElementById('stat-max').innerText = `${Math.round(data.max)} ${data.unit}`;
-                    })
-                    .catch(() => {
-                        document.getElementById('stats-container').style.display = 'none';
-                    });
             });
             weatherOverlay.on('error', () => {
                 document.getElementById('loader').style.display = 'none';
                 document.getElementById('status-text').innerText = "Image not found";
-                document.getElementById('stats-container').style.display = 'none';
             });
         }
 
@@ -262,7 +197,7 @@
                 .then(data => {
                     if (data.error) document.getElementById('click-value').innerText = "N/A";
                     else {
-                        const units = { 't2m': '°F', 'tp': 'in', 'prmsl': 'hPa', 'wind_speed': 'mph' };
+                        const units = { 't2m': '°F', 'tp': 'in', 'prmsl': 'hPa', 'u10': 'mph', 'v10': 'mph' };
                         document.getElementById('click-value').innerText = data.value;
                         document.getElementById('var-unit').innerText = units[varName] || "";
                     }
@@ -271,15 +206,12 @@
 
         function changeFhr(delta) {
             const select = document.getElementById('fhr-select');
-            let newIndex = select.selectedIndex + (delta / 6); // Assuming 6h steps, but index is safer
-            // Better: find current val, add delta, find closest match?
-            // Simple index step:
+            let newIndex = select.selectedIndex + (delta / 6);
             if (newIndex >= 0 && newIndex < select.length) {
                 select.selectedIndex = newIndex;
                 updateMap();
             }
         }
-        
         window.onload = onDateChange;
     </script>
 </body>
