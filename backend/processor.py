@@ -120,6 +120,7 @@ def process_file(file_path):
                     break
         
         if not tasks_needed:
+            # print(f"Skipping {basename} (Already done)")
             return True
 
         print(f"Processing {basename}...")
@@ -173,6 +174,7 @@ def process_file(file_path):
             data_cache['wind_speed'] = data_cache['wind_speed'].assign_coords(latitude=data_cache['u10'].latitude, longitude=data_cache['u10'].longitude)
 
         # 2. Generate Maps
+        generated_count = 0
         for reg_name, reg_cfg in REGIONS.items():
             if fhr_int > reg_cfg['max_fhr']: continue
             
@@ -267,10 +269,14 @@ def process_file(file_path):
                 # Save Stats
                 with open(json_path, 'w') as jf:
                     json.dump({'min': min_val, 'max': max_val, 'unit': config['unit_label']}, jf)
+                
+                generated_count += 1
         
         # Cleanup
         del data_cache
         gc.collect()
+        if generated_count > 0:
+            print(f"Processed {basename}: Generated {generated_count} maps")
         return True
 
     except Exception as e:
@@ -295,7 +301,9 @@ def generate_legends(output_dir):
 
 def run_processor_service():
     print(f"--- AIGFS Raster Processor Started ({MAX_WORKERS} Workers) ---")
+    print(f"CWD: {os.getcwd()}")
     data_dir, output_dir = "data", os.path.join("static", "maps")
+    print(f"Output Dir: {os.path.abspath(output_dir)}")
     os.makedirs(output_dir, exist_ok=True)
     generate_legends(output_dir)
 
