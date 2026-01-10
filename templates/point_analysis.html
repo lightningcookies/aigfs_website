@@ -60,6 +60,8 @@
                     <input type="number" id="lon" step="0.0001" value="-74.0060">
                 </div>
                 
+                <button onclick="setHomeLoc()" class="secondary-btn" style="margin-bottom: 20px;">Use Home Location</button>
+
                 <div class="control-group">
                     <label>Run History</label>
                     <div id="run-list" class="run-list">
@@ -120,6 +122,11 @@
                     }
                 }
             });
+        }
+
+        function setHomeLoc() {
+            document.getElementById('lat').value = 40.4868;
+            document.getElementById('lon').value = -111.6385;
         }
 
         window.onload = async () => {
