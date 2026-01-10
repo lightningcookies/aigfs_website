@@ -8,4 +8,7 @@ cartopy
 beautifulsoup4
 pytz
 psutil
+httpx
+python-dotenv
+scikit-learn
 
