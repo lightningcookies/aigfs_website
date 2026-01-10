@@ -9,7 +9,7 @@ from sklearn.metrics import mean_squared_error
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-DB_PATH = os.path.join("backend", "ml_data.db")
+DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ml_data.db")
 
 def train_models():
     if not os.path.exists(DB_PATH):

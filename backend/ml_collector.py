@@ -16,7 +16,7 @@ from observation_fetcher import NWSObservationFetcher
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-DB_PATH = os.path.join("backend", "ml_data.db")
+DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ml_data.db")
 
 # Alta/Collins Coordinates (Approximate for GFS extraction)
 ALTA_LAT = 40.57  # Collins is around here
