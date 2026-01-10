@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Alta ML Forecast Bias Correction</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns"></script>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; padding: 0; background-color: #1a1a1a; color: white; }
+        .header { background: #333; padding: 10px 20px; display: flex; align-items: center; justify-content: space-between; box-shadow: 0 2px 5px rgba(0,0,0,0.5); }
+        h1 { margin: 0; font-size: 1.2em; }
+        .nav-link { color: #00ffcc; text-decoration: none; font-size: 0.9em; margin-left: 20px; }
+        .container { padding: 20px; max-width: 1200px; margin: 0 auto; }
+        
+        .stats-panel { background: #222; padding: 15px; border-radius: 8px; margin-bottom: 20px; display: flex; gap: 30px; }
+        .stat-box { flex: 1; }
+        .stat-val { font-size: 1.5em; font-weight: bold; color: #00ffcc; }
+        .stat-label { font-size: 0.8em; color: #aaa; text-transform: uppercase; }
+        
+        .chart-container { background: #222; padding: 15px; border-radius: 8px; height: 400px; margin-bottom: 20px; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div style="display: flex; align-items: center;">
+            <h1>Alta ML Forecast (Beta)</h1>
+            <a href="/" class="nav-link">← Back to Map</a>
+        </div>
+    </div>
+
+    <div class="container">
+        <div class="stats-panel">
+            <div class="stat-box">
+                <div class="stat-label">Temperature Bias Model</div>
+                <div class="stat-val" id="temp-model">Training...</div>
+                <div style="font-size:0.8em; color:#888;">Slope / Intercept / RMSE</div>
+            </div>
+            <div class="stat-box">
+                <div class="stat-label">Wind Bias Model</div>
+                <div class="stat-val" id="wind-model">Training...</div>
+            </div>
+        </div>
+
+        <div class="chart-container">
+            <canvas id="tempChart"></canvas>
+        </div>
+        <div class="chart-container">
+            <canvas id="windChart"></canvas>
+        </div>
+    </div>
+
+    <script>
+        let tempChart, windChart;
+
+        function initChart(ctxId, label, yLabel) {
+            const ctx = document.getElementById(ctxId).getContext('2d');
+            return new Chart(ctx, {
+                type: 'line',
+                data: { datasets: [] },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: { mode: 'index', intersect: false },
+                    plugins: {
+                        title: { display: true, text: label, color: 'white', font: { size: 16 } },
+                        legend: { labels: { color: 'white' } }
+                    },
+                    scales: {
+                        x: {
+                            type: 'time',
+                            time: { unit: 'day', displayFormats: { day: 'MMM d' } },
+                            grid: { color: '#444' },
+                            ticks: { color: '#aaa' }
+                        },
+                        y: {
+                            title: { display: true, text: yLabel, color: '#aaa' },
+                            grid: { color: '#444' },
+                            ticks: { color: '#aaa' }
+                        }
+                    }
+                }
+            });
+        }
+
+        window.onload = async () => {
+            tempChart = initChart('tempChart', 'Temperature Forecast', '°F');
+            windChart = initChart('windChart', 'Wind Speed Forecast', 'MPH');
+            
+            try {
+                const res = await fetch('/api/alta-ml');
+                const data = await res.json();
+                
+                if (data.error) {
+                    alert(data.error);
+                    return;
+                }
+                
+                // Update Stats
+                const tInfo = data.model_info.temperature;
+                if (tInfo) {
+                    document.getElementById('temp-model').innerText = 
+                        `m=${tInfo.slope.toFixed(2)}, b=${tInfo.intercept.toFixed(2)}, Err=${tInfo.rmse.toFixed(1)}C`;
+                } else {
+                    document.getElementById('temp-model').innerText = "Insufficient Data";
+                }
+                
+                const wInfo = data.model_info.wind_speed;
+                if (wInfo) {
+                    document.getElementById('wind-model').innerText = 
+                        `m=${wInfo.slope.toFixed(2)}, b=${wInfo.intercept.toFixed(2)}, Err=${wInfo.rmse.toFixed(1)} m/s`;
+                } else {
+                    document.getElementById('wind-model').innerText = "Insufficient Data";
+                }
+                
+                // Plot Data
+                const dates = data.data.map(d => d.time);
+                
+                // Temp
+                tempChart.data.datasets = [
+                    {
+                        label: 'Raw GFS',
+                        data: data.data.map(d => ({ x: d.time, y: d.temp_raw })),
+                        borderColor: '#888',
+                        borderDash: [5, 5],
+                        borderWidth: 2,
+                        pointRadius: 0
+                    },
+                    {
+                        label: 'ML Corrected',
+                        data: data.data.map(d => ({ x: d.time, y: d.temp_corrected })),
+                        borderColor: '#00ffcc',
+                        borderWidth: 3,
+                        pointRadius: 0
+                    }
+                ];
+                tempChart.update();
+                
+                // Wind
+                windChart.data.datasets = [
+                    {
+                        label: 'Raw GFS',
+                        data: data.data.map(d => ({ x: d.time, y: d.wind_raw })),
+                        borderColor: '#888',
+                        borderDash: [5, 5],
+                        borderWidth: 2,
+                        pointRadius: 0
+                    },
+                    {
+                        label: 'ML Corrected',
+                        data: data.data.map(d => ({ x: d.time, y: d.wind_corrected })),
+                        borderColor: '#ff4444',
+                        borderWidth: 3,
+                        pointRadius: 0
+                    }
+                ];
+                windChart.update();
+                
+            } catch (e) {
+                console.error(e);
+            }
+        };
+    </script>
+</body>
+</html>

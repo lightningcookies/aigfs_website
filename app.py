@@ -7,6 +7,7 @@ import pytz
 import gc
 import json
 import concurrent.futures
+import sqlite3
 
 app = Flask(__name__)
 
@@ -292,6 +293,117 @@ def get_point_data():
             result['runs'].append({'name': run_label, 'data': final_data})
 
     return jsonify(result)
+
+import sqlite3
+
+# ... existing code ...
+
+@app.route('/api/alta-ml')
+def get_alta_ml_forecast():
+    # 1. Get coefficients
+    db_path = os.path.join("backend", "ml_data.db")
+    coeffs = {}
+    if os.path.exists(db_path):
+        try:
+            conn = sqlite3.connect(db_path)
+            c = conn.cursor()
+            c.execute("SELECT variable, slope, intercept, rmse FROM model_coefficients")
+            for row in c.fetchall():
+                coeffs[row[0]] = {'slope': row[1], 'intercept': row[2], 'rmse': row[3]}
+            conn.close()
+        except: pass
+
+    # 2. Get Raw Forecast (using existing point logic, but hardcoded for Alta)
+    # Alta Coords
+    lat, lon = 40.57, -111.63
+    
+    # Re-use logic from get_point_data but simplified for latest run only
+    # ... logic similar to get_point_data ...
+    # For brevity, we will call the internal logic if we refactored, but here we duplicate slightly for speed
+    
+    data_dir = 'data'
+    runs = []
+    if os.path.exists(data_dir):
+        for d in os.listdir(data_dir):
+            if '_' in d: runs.append(d)
+    runs.sort(reverse=True)
+    
+    if not runs:
+        return jsonify({'error': 'No GFS data'})
+        
+    latest_run = runs[0]
+    date_str, run_hour = latest_run.split('_')
+    run_path = os.path.join(data_dir, latest_run)
+    
+    raw_data = []
+    
+    # Get files
+    files = []
+    for f in os.listdir(run_path):
+        if f.endswith('.grib2'):
+            try:
+                fhr = int(f.split('.f')[-1].replace('.grib2', ''))
+                files.append((fhr, os.path.join(run_path, f)))
+            except: pass
+    files.sort()
+    
+    # Process
+    for fhr, fpath in files:
+        if fhr > 120 and fhr % 12 != 0: continue
+        
+        try:
+            # T2m
+            ds = xr.open_dataset(fpath, engine='cfgrib', backend_kwargs={'filter_by_keys': VAR_FILTERS['t2m']})
+            t2m_k = float(ds['t2m'].sel(latitude=lat, longitude=lon, method='nearest').values)
+            ds.close()
+            
+            # Wind
+            ds = xr.open_dataset(fpath, engine='cfgrib', backend_kwargs={'filter_by_keys': {'typeOfLevel': 'heightAboveGround', 'level': 10}})
+            u = float(ds['u10'].sel(latitude=lat, longitude=lon, method='nearest').values)
+            v = float(ds['v10'].sel(latitude=lat, longitude=lon, method='nearest').values)
+            ds.close()
+            
+            t2m_c = t2m_k - 273.15
+            wind_ms = np.sqrt(u**2 + v**2)
+            
+            # Apply Correction
+            corrected_t_c = t2m_c
+            corrected_w_ms = wind_ms
+            
+            if 'temperature' in coeffs:
+                # Corrected = Slope * Raw + Intercept
+                corrected_t_c = (coeffs['temperature']['slope'] * t2m_c) + coeffs['temperature']['intercept']
+                
+            if 'wind_speed' in coeffs:
+                corrected_w_ms = (coeffs['wind_speed']['slope'] * wind_ms) + coeffs['wind_speed']['intercept']
+            
+            # Convert to Display Units (F, MPH)
+            t_raw_f = (t2m_c * 9/5) + 32
+            t_corr_f = (corrected_t_c * 9/5) + 32
+            
+            w_raw_mph = wind_ms * 2.237
+            w_corr_mph = corrected_w_ms * 2.237
+            
+            valid_time = utc_to_mst(date_str, run_hour) + timedelta(hours=fhr)
+            
+            raw_data.append({
+                'time': valid_time.isoformat(),
+                'temp_raw': round(t_raw_f, 1),
+                'temp_corrected': round(t_corr_f, 1),
+                'wind_raw': round(w_raw_mph, 1),
+                'wind_corrected': round(w_corr_mph, 1)
+            })
+            
+        except: pass
+        
+    return jsonify({
+        'data': raw_data,
+        'model_info': coeffs
+    })
+
+@app.route('/alta-ml')
+def alta_ml_page():
+    return render_template('alta_ml.html')
 
 @app.route('/static/maps/<path:filename>')
 def serve_map(filename):
