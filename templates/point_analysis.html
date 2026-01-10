@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AIGFS Point Analysis</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns"></script>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; padding: 0; background-color: #1a1a1a; color: white; }
+        .header { background: #333; padding: 10px 20px; display: flex; align-items: center; justify-content: space-between; box-shadow: 0 2px 5px rgba(0,0,0,0.5); }
+        h1 { margin: 0; font-size: 1.2em; }
+        .nav-link { color: #00ffcc; text-decoration: none; font-size: 0.9em; margin-left: 20px; }
+        .container { padding: 20px; max-width: 1200px; margin: 0 auto; }
+        .controls { background: #222; padding: 20px; border-radius: 8px; display: flex; gap: 20px; align-items: end; margin-bottom: 20px; }
+        .control-group { display: flex; flex-direction: column; gap: 5px; }
+        label { font-size: 0.8em; font-weight: bold; color: #aaa; text-transform: uppercase; }
+        input { padding: 10px; background: #333; color: white; border: 1px solid #444; border-radius: 4px; font-size: 1em; width: 100px; }
+        button { padding: 10px 20px; background: #00ffcc; color: #000; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; }
+        button:hover { background: #00ccaa; }
+        button:disabled { background: #555; cursor: not-allowed; }
+        .charts-grid { display: grid; grid-template-columns: 1fr; gap: 20px; }
+        .chart-container { background: #222; padding: 15px; border-radius: 8px; height: 350px; }
+        .error { color: #ff4444; margin-top: 10px; display: none; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div style="display: flex; align-items: center;">
+            <h1>AIGFS Point Analysis</h1>
+            <a href="/" class="nav-link">← Back to Map</a>
+        </div>
+    </div>
+
+    <div class="container">
+        <div class="controls">
+            <div class="control-group">
+                <label>Latitude</label>
+                <input type="number" id="lat" step="0.0001" value="40.7128">
+            </div>
+            <div class="control-group">
+                <label>Longitude</label>
+                <input type="number" id="lon" step="0.0001" value="-74.0060">
+            </div>
+            <button onclick="fetchData()" id="analyze-btn">Analyze Point</button>
+        </div>
+        <div id="error-msg" class="error"></div>
+
+        <div class="charts-grid">
+            <div class="chart-container">
+                <canvas id="tempChart"></canvas>
+            </div>
+            <div class="chart-container">
+                <canvas id="precipChart"></canvas>
+            </div>
+            <div class="chart-container">
+                <canvas id="windChart"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let charts = {};
+
+        function initChart(ctxId, label, yLabel) {
+            const ctx = document.getElementById(ctxId).getContext('2d');
+            return new Chart(ctx, {
+                type: 'line',
+                data: { datasets: [] },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: { mode: 'index', intersect: false },
+                    plugins: {
+                        title: { display: true, text: label, color: 'white', font: { size: 16 } },
+                        legend: { labels: { color: 'white' } }
+                    },
+                    scales: {
+                        x: {
+                            type: 'time',
+                            time: { unit: 'day', displayFormats: { day: 'MMM d' } },
+                            grid: { color: '#444' },
+                            ticks: { color: '#aaa' }
+                        },
+                        y: {
+                            title: { display: true, text: yLabel, color: '#aaa' },
+                            grid: { color: '#444' },
+                            ticks: { color: '#aaa' }
+                        }
+                    }
+                }
+            });
+        }
+
+        window.onload = () => {
+            charts.temp = initChart('tempChart', 'Temperature (2m)', '°F');
+            charts.precip = initChart('precipChart', 'Cumulative Precipitation', 'Inches');
+            charts.wind = initChart('windChart', 'Wind Speed (10m)', 'MPH');
+        };
+
+        async function fetchData() {
+            const lat = document.getElementById('lat').value;
+            const lon = document.getElementById('lon').value;
+            const btn = document.getElementById('analyze-btn');
+            const err = document.getElementById('error-msg');
+            
+            btn.disabled = true;
+            btn.innerText = "Loading...";
+            err.style.display = 'none';
+
+            try {
+                const res = await fetch(`/api/point-data?lat=${lat}&lon=${lon}`);
+                const data = await res.json();
+                
+                if (data.error) throw new Error(data.error);
+
+                updateCharts(data.runs);
+            } catch (e) {
+                err.innerText = e.message;
+                err.style.display = 'block';
+            } finally {
+                btn.disabled = false;
+                btn.innerText = "Analyze Point";
+            }
+        }
+
+        function updateCharts(runs) {
+            // Colors for different runs (Latest = Brightest)
+            const colors = ['#00ffcc', '#0099ff', '#8844ff', '#ff4444'];
+            
+            // Clear existing datasets
+            Object.values(charts).forEach(c => c.data.datasets = []);
+
+            runs.forEach((run, idx) => {
+                const color = colors[idx % colors.length];
+                const borderDash = idx === 0 ? [] : [5, 5]; // Dashed for older runs
+                const opacity = idx === 0 ? 1 : 0.6;
+
+                // Temp
+                charts.temp.data.datasets.push({
+                    label: `Run ${run.name}`,
+                    data: run.data.map(d => ({ x: d.time, y: d.t2m })),
+                    borderColor: color,
+                    borderDash: borderDash,
+                    tension: 0.3,
+                    pointRadius: 0
+                });
+
+                // Precip (Cumulative)
+                charts.precip.data.datasets.push({
+                    label: `Run ${run.name}`,
+                    data: run.data.map(d => ({ x: d.time, y: d.tp_acum })),
+                    borderColor: color,
+                    borderDash: borderDash,
+                    fill: idx === 0, // Fill only the latest
+                    backgroundColor: idx === 0 ? color + '20' : 'transparent',
+                    tension: 0.1,
+                    pointRadius: 0
+                });
+
+                // Wind
+                charts.wind.data.datasets.push({
+                    label: `Run ${run.name}`,
+                    data: run.data.map(d => ({ x: d.time, y: d.wind })),
+                    borderColor: color,
+                    borderDash: borderDash,
+                    tension: 0.3,
+                    pointRadius: 0
+                });
+            });
+
+            Object.values(charts).forEach(c => c.update());
+        }
+    </script>
+</body>
+</html>

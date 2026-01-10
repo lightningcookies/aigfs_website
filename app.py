@@ -145,6 +145,114 @@ def get_value():
             del ds
         gc.collect()
 
+@app.route('/point-analysis')
+def point_analysis():
+    return render_template('point_analysis.html')
+
+@app.route('/api/point-data')
+def get_point_data():
+    try:
+        lat = float(request.args.get('lat'))
+        lon = float(request.args.get('lon'))
+        if lon < 0: lon += 360
+    except:
+        return jsonify({'error': 'Invalid coordinates'}), 400
+
+    # Find available runs
+    data_dir = 'data'
+    if not os.path.exists(data_dir):
+        return jsonify({'error': 'No data available'}), 404
+
+    runs = []
+    for d in os.listdir(data_dir):
+        if os.path.isdir(os.path.join(data_dir, d)) and '_' in d:
+            runs.append(d)
+    
+    runs.sort(reverse=True)
+    selected_runs = runs[:3] # Last 3 runs
+
+    result = {'runs': []}
+    
+    for run_dir in selected_runs:
+        date_str, run_hour = run_dir.split('_')
+        run_label = f"{date_str} {run_hour}Z"
+        run_path = os.path.join(data_dir, run_dir)
+        
+        run_data = {'name': run_label, 'data': []}
+        
+        # Get sorted files
+        files = []
+        for f in os.listdir(run_path):
+            if f.endswith('.grib2'):
+                try:
+                    fhr = int(f.split('.f')[-1].replace('.grib2', ''))
+                    files.append((fhr, os.path.join(run_path, f)))
+                except: pass
+        files.sort()
+        
+        # Limit processing to speed up (every file for first 24h, then every 6h? They are already every 6h)
+        # We process all of them, but sequentially. 
+        # To optimize, we assume the user only cares about a rough trend if it's slow.
+        # But let's try to process up to 30-40 files (last 7 days?)
+        # GFS goes out to 384h. That's 64 files.
+        # Opening 64 files takes time.
+        
+        # Accumulator for Precip
+        current_tp_accum = 0.0
+        
+        for fhr, fpath in files:
+            # Optimization: Skip intermediate hours for long range
+            # 0-120h: Keep all (every 6h)
+            # >120h: Keep every 12h
+            if fhr > 120 and fhr % 12 != 0:
+                continue
+
+            try:
+                # T2m
+                ds_t2m = xr.open_dataset(fpath, engine='cfgrib', backend_kwargs={'filter_by_keys': VAR_FILTERS['t2m']})
+                t2m = float(ds_t2m['t2m'].sel(latitude=lat, longitude=lon, method='nearest').values)
+                ds_t2m.close()
+                
+                # Wind
+                ds_wind = xr.open_dataset(fpath, engine='cfgrib', 
+                    backend_kwargs={'filter_by_keys': {'typeOfLevel': 'heightAboveGround', 'level': 10}})
+                u10 = float(ds_wind['u10'].sel(latitude=lat, longitude=lon, method='nearest').values)
+                v10 = float(ds_wind['v10'].sel(latitude=lat, longitude=lon, method='nearest').values)
+                ds_wind.close()
+                
+                # TP
+                ds_tp = xr.open_dataset(fpath, engine='cfgrib', backend_kwargs={'filter_by_keys': VAR_FILTERS['tp']})
+                tp = float(ds_tp['tp'].sel(latitude=lat, longitude=lon, method='nearest').values)
+                ds_tp.close()
+                
+                # Conversions
+                t2m_f = UNIT_CONV['t2m'](t2m)
+                wind_mph = UNIT_CONV['u10'](np.sqrt(u10**2 + v10**2))
+                tp_in = UNIT_CONV['tp'](tp)
+                
+                # Accumulate TP logic:
+                # Assuming data is per-step (6h) based on 'Precipitation (6h)' label
+                # We simply add the current step's precip to the total.
+                current_tp_accum += tp_in
+                
+                valid_time = utc_to_mst(date_str, run_hour) + timedelta(hours=fhr)
+                
+                run_data['data'].append({
+                    'time': valid_time.isoformat(),
+                    't2m': round(t2m_f, 1),
+                    'wind': round(wind_mph, 1),
+                    'tp_acum': round(current_tp_accum, 2)
+                })
+                
+            except Exception as e:
+                # print(f"Error reading {fpath}: {e}")
+                pass
+                
+        if run_data['data']:
+            result['runs'].append(run_data)
+
+    return jsonify(result)
+
 @app.route('/static/maps/<path:filename>')
 def serve_map(filename):
     return send_from_directory('static/maps', filename)
