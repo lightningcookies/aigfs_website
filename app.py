@@ -40,14 +40,18 @@ UNIT_CONV = {
     'tp': lambda x: float(x) / 25.4
 }
 
-def utc_to_mst(date_str, hour_str):
+def utc_to_tz(date_str, hour_str, timezone='US/Mountain'):
     try:
         utc_dt = datetime.strptime(f"{date_str}{hour_str}", "%Y%m%d%H")
         utc_dt = pytz.utc.localize(utc_dt)
-        mst_dt = utc_dt.astimezone(pytz.timezone('US/Mountain'))
-        return mst_dt
+        tz_dt = utc_dt.astimezone(pytz.timezone(timezone))
+        return tz_dt
     except:
         return datetime.now()
+
+# Wrapper for backward compatibility if needed, though we will update usages
+def utc_to_mst(date_str, hour_str):
+    return utc_to_tz(date_str, hour_str, 'US/Mountain')
 
 @app.route('/')
 def index():
@@ -166,7 +170,7 @@ def point_analysis():
     return render_template('point_analysis.html')
 
 def extract_grib_point(args):
-    fpath, lat, lon, fhr, date_str, run_hour = args
+    fpath, lat, lon, fhr, date_str, run_hour, timezone = args
     try:
         # T2m
         ds_t2m = xr.open_dataset(fpath, engine='cfgrib', backend_kwargs={'filter_by_keys': VAR_FILTERS['t2m']})
@@ -190,7 +194,7 @@ def extract_grib_point(args):
         wind_mph = UNIT_CONV['u10'](np.sqrt(u10**2 + v10**2))
         tp_in = UNIT_CONV['tp'](tp)
         
-        valid_time = utc_to_mst(date_str, run_hour) + timedelta(hours=fhr)
+        valid_time = utc_to_tz(date_str, run_hour, timezone) + timedelta(hours=fhr)
         
         return {
             'fhr': fhr,
@@ -208,6 +212,7 @@ def get_point_data():
         lat = float(request.args.get('lat'))
         lon = float(request.args.get('lon'))
         if lon < 0: lon += 360
+        timezone = request.args.get('timezone', 'US/Mountain')
     except:
         return jsonify({'error': 'Invalid coordinates'}), 400
 
@@ -250,7 +255,7 @@ def get_point_data():
                     if fhr > 120 and fhr % 12 != 0:
                         continue
                         
-                    tasks.append((os.path.join(run_path, f), lat, lon, fhr, date_str, run_hour))
+                    tasks.append((os.path.join(run_path, f), lat, lon, fhr, date_str, run_hour, timezone))
                 except: pass
         
         # Execute parallel reads
