@@ -12,13 +12,28 @@
         h1 { margin: 0; font-size: 1.2em; }
         .nav-link { color: #00ffcc; text-decoration: none; font-size: 0.9em; margin-left: 20px; }
         .container { padding: 20px; max-width: 1200px; margin: 0 auto; }
+        
+        .main-layout { display: grid; grid-template-columns: 250px 1fr; gap: 20px; }
+        
+        .sidebar { background: #222; padding: 20px; border-radius: 8px; height: fit-content; }
         .controls { background: #222; padding: 20px; border-radius: 8px; display: flex; gap: 20px; align-items: end; margin-bottom: 20px; }
-        .control-group { display: flex; flex-direction: column; gap: 5px; }
+        
+        .control-group { display: flex; flex-direction: column; gap: 5px; margin-bottom: 15px; }
         label { font-size: 0.8em; font-weight: bold; color: #aaa; text-transform: uppercase; }
-        input { padding: 10px; background: #333; color: white; border: 1px solid #444; border-radius: 4px; font-size: 1em; width: 100px; }
-        button { padding: 10px 20px; background: #00ffcc; color: #000; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; }
+        input[type="number"] { padding: 10px; background: #333; color: white; border: 1px solid #444; border-radius: 4px; font-size: 1em; width: 100%; box-sizing: border-box; }
+        
+        button { padding: 10px 20px; background: #00ffcc; color: #000; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; width: 100%; margin-bottom: 10px; }
         button:hover { background: #00ccaa; }
         button:disabled { background: #555; cursor: not-allowed; }
+        
+        .secondary-btn { background: #444; color: white; }
+        .secondary-btn:hover { background: #555; }
+
+        .run-list { max-height: 300px; overflow-y: auto; background: #333; border: 1px solid #444; border-radius: 4px; padding: 10px; }
+        .run-item { display: flex; align-items: center; gap: 10px; padding: 5px 0; border-bottom: 1px solid #444; }
+        .run-item:last-child { border-bottom: none; }
+        .run-item input { width: auto; }
+        
         .charts-grid { display: grid; grid-template-columns: 1fr; gap: 20px; }
         .chart-container { background: #222; padding: 15px; border-radius: 8px; height: 350px; }
         .error { color: #ff4444; margin-top: 10px; display: none; }
@@ -33,34 +48,49 @@
     </div>
 
     <div class="container">
-        <div class="controls">
-            <div class="control-group">
-                <label>Latitude</label>
-                <input type="number" id="lat" step="0.0001" value="40.7128">
-            </div>
-            <div class="control-group">
-                <label>Longitude</label>
-                <input type="number" id="lon" step="0.0001" value="-74.0060">
-            </div>
-            <button onclick="fetchData()" id="analyze-btn">Analyze Point</button>
-        </div>
-        <div id="error-msg" class="error"></div>
+        <div class="main-layout">
+            <!-- Sidebar Controls -->
+            <div class="sidebar">
+                <div class="control-group">
+                    <label>Latitude</label>
+                    <input type="number" id="lat" step="0.0001" value="40.7128">
+                </div>
+                <div class="control-group">
+                    <label>Longitude</label>
+                    <input type="number" id="lon" step="0.0001" value="-74.0060">
+                </div>
+                
+                <div class="control-group">
+                    <label>Run History</label>
+                    <div id="run-list" class="run-list">
+                        <div style="color: #888; font-size: 0.9em; padding: 10px;">Loading runs...</div>
+                    </div>
+                </div>
 
-        <div class="charts-grid">
-            <div class="chart-container">
-                <canvas id="tempChart"></canvas>
+                <button onclick="fetchData()" id="analyze-btn">Analyze Point</button>
+                <button onclick="downloadCSV()" class="secondary-btn" id="dl-btn" disabled>Download CSV</button>
+                
+                <div id="error-msg" class="error"></div>
             </div>
-            <div class="chart-container">
-                <canvas id="precipChart"></canvas>
-            </div>
-            <div class="chart-container">
-                <canvas id="windChart"></canvas>
+
+            <!-- Charts -->
+            <div class="charts-grid">
+                <div class="chart-container">
+                    <canvas id="tempChart"></canvas>
+                </div>
+                <div class="chart-container">
+                    <canvas id="precipChart"></canvas>
+                </div>
+                <div class="chart-container">
+                    <canvas id="windChart"></canvas>
+                </div>
             </div>
         </div>
     </div>
 
     <script>
         let charts = {};
+        let currentData = null; // Store for CSV download
 
         function initChart(ctxId, label, yLabel) {
             const ctx = document.getElementById(ctxId).getContext('2d');
@@ -92,28 +122,84 @@
             });
         }
 
-        window.onload = () => {
+        window.onload = async () => {
             charts.temp = initChart('tempChart', 'Temperature (2m)', '°F');
             charts.precip = initChart('precipChart', 'Cumulative Precipitation', 'Inches');
             charts.wind = initChart('windChart', 'Wind Speed (10m)', 'MPH');
+            
+            await loadRuns();
         };
+
+        async function loadRuns() {
+            try {
+                const res = await fetch('/api/runs');
+                const runs = await res.json();
+                const container = document.getElementById('run-list');
+                container.innerHTML = '';
+                
+                runs.forEach((run, idx) => {
+                    const div = document.createElement('div');
+                    div.className = 'run-item';
+                    
+                    const checkbox = document.createElement('input');
+                    checkbox.type = 'checkbox';
+                    checkbox.value = run;
+                    checkbox.id = `run-${run}`;
+                    // Select first 3 by default
+                    if (idx < 3) checkbox.checked = true;
+                    
+                    const label = document.createElement('label');
+                    label.htmlFor = `run-${run}`;
+                    label.style.marginBottom = '0';
+                    label.style.cursor = 'pointer';
+                    // Format Label: 20250109_12 -> Jan 09, 12Z
+                    const parts = run.split('_');
+                    const d = parts[0];
+                    const h = parts[1];
+                    // Simple formatting
+                    const formatted = `${d.substring(4,6)}/${d.substring(6,8)} ${h}Z`;
+                    label.innerText = formatted;
+                    
+                    div.appendChild(checkbox);
+                    div.appendChild(label);
+                    container.appendChild(div);
+                });
+            } catch (e) {
+                console.error("Failed to load runs", e);
+            }
+        }
+
+        function getSelectedRuns() {
+            const boxes = document.querySelectorAll('#run-list input[type="checkbox"]:checked');
+            return Array.from(boxes).map(cb => cb.value);
+        }
 
         async function fetchData() {
             const lat = document.getElementById('lat').value;
             const lon = document.getElementById('lon').value;
             const btn = document.getElementById('analyze-btn');
             const err = document.getElementById('error-msg');
+            const selectedRuns = getSelectedRuns();
             
+            if (selectedRuns.length === 0) {
+                err.innerText = "Please select at least one run.";
+                err.style.display = 'block';
+                return;
+            }
+
             btn.disabled = true;
             btn.innerText = "Loading...";
             err.style.display = 'none';
 
             try {
-                const res = await fetch(`/api/point-data?lat=${lat}&lon=${lon}`);
+                const runsParam = selectedRuns.join(',');
+                const res = await fetch(`/api/point-data?lat=${lat}&lon=${lon}&runs=${runsParam}`);
                 const data = await res.json();
                 
                 if (data.error) throw new Error(data.error);
 
+                currentData = data.runs; // Store for CSV
+                document.getElementById('dl-btn').disabled = false;
                 updateCharts(data.runs);
             } catch (e) {
                 err.innerText = e.message;
@@ -126,50 +212,77 @@
 
         function updateCharts(runs) {
             // Colors for different runs (Latest = Brightest)
-            const colors = ['#00ffcc', '#0099ff', '#8844ff', '#ff4444'];
+            // Need a larger palette if many runs selected
+            const colors = ['#00ffcc', '#0099ff', '#8844ff', '#ff4444', '#ff8800', '#ffff00', '#44ff44', '#ffffff'];
             
             // Clear existing datasets
             Object.values(charts).forEach(c => c.data.datasets = []);
 
             runs.forEach((run, idx) => {
                 const color = colors[idx % colors.length];
-                const borderDash = idx === 0 ? [] : [5, 5]; // Dashed for older runs
-                const opacity = idx === 0 ? 1 : 0.6;
+                const isLatest = idx === 0; // Assuming sorted return
+                const borderDash = isLatest ? [] : [5, 5]; 
+                const opacity = isLatest ? 1 : 0.6;
+                const borderWidth = isLatest ? 2 : 1;
 
                 // Temp
                 charts.temp.data.datasets.push({
-                    label: `Run ${run.name}`,
+                    label: run.name,
                     data: run.data.map(d => ({ x: d.time, y: d.t2m })),
                     borderColor: color,
                     borderDash: borderDash,
+                    borderWidth: borderWidth,
                     tension: 0.3,
                     pointRadius: 0
                 });
 
                 // Precip (Cumulative)
                 charts.precip.data.datasets.push({
-                    label: `Run ${run.name}`,
+                    label: run.name,
                     data: run.data.map(d => ({ x: d.time, y: d.tp_acum })),
                     borderColor: color,
                     borderDash: borderDash,
-                    fill: idx === 0, // Fill only the latest
-                    backgroundColor: idx === 0 ? color + '20' : 'transparent',
+                    borderWidth: borderWidth,
+                    // fill: isLatest, // Filling makes it messy with many lines
                     tension: 0.1,
                     pointRadius: 0
                 });
 
                 // Wind
                 charts.wind.data.datasets.push({
-                    label: `Run ${run.name}`,
+                    label: run.name,
                     data: run.data.map(d => ({ x: d.time, y: d.wind })),
                     borderColor: color,
                     borderDash: borderDash,
+                    borderWidth: borderWidth,
                     tension: 0.3,
                     pointRadius: 0
                 });
             });
 
             Object.values(charts).forEach(c => c.update());
+        }
+
+        function downloadCSV() {
+            if (!currentData || currentData.length === 0) return;
+
+            let csv = "Run,Time,Temperature(F),Wind(MPH),PrecipAcc(in)\n";
+            
+            currentData.forEach(run => {
+                run.data.forEach(pt => {
+                    csv += `${run.name},${pt.time},${pt.t2m},${pt.wind},${pt.tp_acum}\n`;
+                });
+            });
+
+            const blob = new Blob([csv], { type: 'text/csv' });
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.setAttribute('hidden', '');
+            a.setAttribute('href', url);
+            a.setAttribute('download', 'aigfs_point_analysis.csv');
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
         }
     </script>
 </body>
