@@ -169,12 +169,42 @@ def get_gfs_forecast_for_time(target_time_utc):
         logger.error(f"Error extracting GFS: {e}")
         return None
 
-def collect_and_store():
-    """Main loop logic."""
+def collect_and_store(start_date=None):
+    """
+    Main loop logic.
+    If start_date is provided (datetime object), fetches history from that date.
+    Otherwise fetches recent (last 6 hours).
+    """
     fetcher = NWSObservationFetcher()
     
-    # Get recent observations (last 6 hours to catch up)
-    obs_list = fetcher.get_recent_observations(hours=6)
+    obs_list = []
+    
+    if start_date:
+        logger.info(f"Backfilling data from {start_date}...")
+        # Check if start_date is naive
+        if start_date.tzinfo is None:
+            start_date = start_date.replace(tzinfo=timezone.utc)
+            
+        # NWS API pagination limits (500). We might need to chunk if range is large.
+        # But for simplicity, let's just ask. If it fails due to size, we might need loops.
+        # observation_fetcher.get_observations handles limit=500.
+        # Let's verify if we need to loop days.
+        # The API is fairly robust. Let's try day by day chunks to be safe.
+        
+        current_start = start_date
+        now = datetime.now(timezone.utc)
+        
+        while current_start < now:
+            next_end = min(current_start + timedelta(days=7), now)
+            logger.info(f"Fetching chunk: {current_start.date()} to {next_end.date()}")
+            chunk = fetcher.get_observations(start_time=current_start, end_time=next_end, limit=5000) # Increased limit
+            obs_list.extend(chunk)
+            current_start = next_end
+            time.sleep(1) # Be nice to API
+            
+    else:
+        # Get recent observations (last 6 hours to catch up)
+        obs_list = fetcher.get_recent_observations(hours=6)
     
     if not obs_list:
         logger.info("No observations found.")
@@ -235,6 +265,22 @@ def collect_and_store():
 def run_service():
     init_db()
     logger.info("ML Data Collector Service Started")
+    
+    # Initial Backfill Check
+    # If DB is empty, or user requested, we backfill from 2026-01-01
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("SELECT COUNT(*) FROM training_data")
+    count = c.fetchone()[0]
+    conn.close()
+    
+    if count == 0:
+        logger.info("Database empty. Starting backfill from Jan 1, 2026...")
+        backfill_start = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        try:
+            collect_and_store(start_date=backfill_start)
+        except Exception as e:
+            logger.error(f"Backfill failed: {e}")
     
     while True:
         try:
