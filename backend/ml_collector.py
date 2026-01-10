@@ -207,9 +207,14 @@ def collect_and_store(start_date=None):
         now = datetime.now(timezone.utc)
         
         while current_start < now:
-            next_end = min(current_start + timedelta(days=7), now)
+            next_end = min(current_start + timedelta(days=3), now)
             logger.info(f"Fetching chunk: {current_start.date()} to {next_end.date()}")
-            chunk = fetcher.get_observations(start_time=current_start, end_time=next_end, limit=5000) # Increased limit
+            # NWS API often rejects large limits or long ranges. 
+            # Limit to 500 is standard page size? No, documentation says 500 is default/max often?
+            # Actually NWS API doesn't support 'limit' > 500 reliably.
+            # We should paginate if we need more, but reducing days is easier.
+            # 3 days * 24 hours = 72 obs. So limit=500 is plenty.
+            chunk = fetcher.get_observations(start_time=current_start, end_time=next_end, limit=500) 
             obs_list.extend(chunk)
             current_start = next_end
             time.sleep(1) # Be nice to API
