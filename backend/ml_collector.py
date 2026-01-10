@@ -3,7 +3,7 @@ import sys
 import sqlite3
 import time
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import numpy as np
 import xarray as xr
 import pytz
