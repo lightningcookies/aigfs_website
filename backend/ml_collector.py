@@ -116,6 +116,18 @@ def get_gfs_forecast_for_time(target_time_utc):
         # Let's look for exact match in our downloaded files
         # Check f{fhr:03d}
         
+        # AIGFS files are every 6 hours (000, 006, 012...)
+        # If fhr is not a multiple of 6, we can't find it directly.
+        # We should find the closest available fhr?
+        # NWS observations are hourly. GFS is 6-hourly.
+        # Ideally we interpolate. For MVP, let's just snap to closest 6h?
+        # Or even better: if fhr % 6 != 0, we can't match exactly. 
+        # But we are doing backfill. We have many observations.
+        # Let's only keep observations that align with GFS steps (0, 6, 12...)
+        
+        if fhr % 6 != 0:
+            continue
+            
         fname = f"aigfs.t{run_dt.strftime('%H')}z.sfc.f{fhr:03d}.grib2"
         fpath = os.path.join(data_dir, run_dir_name, fname)
         
