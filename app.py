@@ -62,7 +62,6 @@ def index():
     files = os.listdir(maps_dir)
     # Structure: { date: { run: { region: { var: [fhrs] } } } }
     catalog = {}
-    fhr_labels = {}
 
     for f in files:
         if f.endswith('.png') and not f.startswith('legend_'):
@@ -76,16 +75,23 @@ def index():
                 
                 if run not in catalog[date]['runs']:
                     mst_run_dt = utc_to_mst(date, run)
-                    catalog[date]['runs'][run] = {'label': mst_run_dt.strftime("%I %p MST"), 'fhrs': set(), 'regions': set(), 'vars': set()}
+                    # Calculate UTC epoch for frontend calc
+                    try:
+                        utc_dt_obj = datetime.strptime(f"{date}{run}", "%Y%m%d%H")
+                        utc_dt_obj = pytz.utc.localize(utc_dt_obj)
+                        epoch = utc_dt_obj.timestamp()
+                    except:
+                        epoch = 0
+                    
+                    catalog[date]['runs'][run] = {
+                        'label': mst_run_dt.strftime("%I %p MST"), 
+                        'epoch': epoch,
+                        'fhrs': set(), 'regions': set(), 'vars': set()
+                    }
                 
                 catalog[date]['runs'][run]['fhrs'].add(fhr)
                 catalog[date]['runs'][run]['regions'].add(region)
                 catalog[date]['runs'][run]['vars'].add(var)
-
-                # Store FHR display labels
-                mst_run_dt = utc_to_mst(date, run)
-                fhr_dt = mst_run_dt + timedelta(hours=int(fhr))
-                fhr_labels[fhr] = fhr_dt.strftime("%a %I %p MST")
 
     if not catalog:
         return "No map images found."
@@ -113,7 +119,6 @@ def index():
     return render_template('index.html', 
                           catalog=catalog,
                           sorted_dates=sorted_dates,
-                          fhr_labels=fhr_labels,
                           var_display=VAR_DISPLAY,
                           region_display=REGION_DISPLAY)
 
