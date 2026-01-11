@@ -41,17 +41,43 @@ def init_db():
             timestamp TEXT PRIMARY KEY,
             
             obs_temp REAL,
-            obs_wind REAL,
-            obs_precip REAL,
+            obs_u10 REAL,
+            obs_v10 REAL,
+            obs_pressure REAL,
+            obs_precip_1h REAL,
+            obs_precip_6h REAL,
             
             gfs_temp REAL,
-            gfs_wind REAL,
-            gfs_precip REAL,
+            gfs_u10 REAL,
+            gfs_v10 REAL,
+            gfs_pressure REAL,
+            gfs_tp_accum REAL,
             
             gfs_run_date TEXT,
             gfs_fhr INTEGER
         )
     ''')
+    
+    # Check if we need to add new columns to existing table (simple migration)
+    c.execute("PRAGMA table_info(training_data)")
+    columns = [col[1] for col in c.fetchall()]
+    
+    new_cols = {
+        'obs_u10': 'REAL',
+        'obs_v10': 'REAL',
+        'obs_pressure': 'REAL',
+        'obs_precip_1h': 'REAL',
+        'obs_precip_6h': 'REAL',
+        'gfs_u10': 'REAL',
+        'gfs_v10': 'REAL',
+        'gfs_pressure': 'REAL',
+        'gfs_tp_accum': 'REAL'
+    }
+    
+    for col_name, col_type in new_cols.items():
+        if col_name not in columns:
+            logger.info(f"Adding column {col_name} to training_data")
+            c.execute(f"ALTER TABLE training_data ADD COLUMN {col_name} {col_type}")
     
     # Table for trained model coefficients
     c.execute('''
@@ -144,36 +170,46 @@ def get_gfs_forecast_for_time(target_time_utc):
     try:
         values = {}
         
-        # T2m
+        # GFS longitudes are 0-360. Convert if needed.
+        grib_lon = ALTA_LON if ALTA_LON >= 0 else ALTA_LON + 360
+
+        # T2m (2m Temperature)
         try:
             ds = xr.open_dataset(best_file, engine='cfgrib', backend_kwargs={'filter_by_keys': {'typeOfLevel': 'heightAboveGround', 'level': 2}})
-            val = ds['t2m'].sel(latitude=ALTA_LAT, longitude=ALTA_LON, method='nearest').values
+            val = ds['t2m'].sel(latitude=ALTA_LAT, longitude=grib_lon, method='nearest').values
             values['temp'] = float(val) - 273.15 # K to C
             ds.close()
         except: values['temp'] = None
         
-        # Wind
+        # Wind (10m U/V)
         try:
             ds = xr.open_dataset(best_file, engine='cfgrib', backend_kwargs={'filter_by_keys': {'typeOfLevel': 'heightAboveGround', 'level': 10}})
-            u = ds['u10'].sel(latitude=ALTA_LAT, longitude=ALTA_LON, method='nearest').values
-            v = ds['v10'].sel(latitude=ALTA_LAT, longitude=ALTA_LON, method='nearest').values
-            values['wind'] = float(np.sqrt(u**2 + v**2)) # m/s
+            u = ds['u10'].sel(latitude=ALTA_LAT, longitude=grib_lon, method='nearest').values
+            v = ds['v10'].sel(latitude=ALTA_LAT, longitude=grib_lon, method='nearest').values
+            values['u10'] = float(u)
+            values['v10'] = float(v)
             ds.close()
-        except: values['wind'] = None
+        except: 
+            values['u10'] = None
+            values['v10'] = None
 
-        # Precip (Total Precipitation)
-        # Note: GFS 'tp' is often accumulated. 
-        # If we want 1h precip, we'd need to diff with previous hour.
-        # But we download every 6h. So we can only get 6h precip accurately?
-        # NWS gives 'precipitationLastHour'.
-        # For this simple model, let's skip Precip for now or just store raw TP for future diffing.
-        # Let's store raw TP.
+        # Pressure (Mean Sea Level)
+        try:
+            ds = xr.open_dataset(best_file, engine='cfgrib', backend_kwargs={'filter_by_keys': {'typeOfLevel': 'meanSea'}})
+            val = ds['prmsl'].sel(latitude=ALTA_LAT, longitude=grib_lon, method='nearest').values
+            values['pressure'] = float(val) # Pa
+            ds.close()
+        except: values['pressure'] = None
+
+        # Precip (Total Precipitation - Accumulated)
         try:
             ds = xr.open_dataset(best_file, engine='cfgrib', backend_kwargs={'filter_by_keys': {'shortName': 'tp'}})
-            val = ds['tp'].sel(latitude=ALTA_LAT, longitude=ALTA_LON, method='nearest').values
-            values['precip'] = float(val) # mm
+            val = ds['tp'].sel(latitude=ALTA_LAT, longitude=grib_lon, method='nearest').values
+            values['tp_accum'] = float(val) # mm
             ds.close()
-        except: values['precip'] = 0.0
+        except: values['tp_accum'] = 0.0
+
+        return {'values': values, 'run': best_run, 'fhr': best_fhr}
 
         return {'values': values, 'run': best_run, 'fhr': best_fhr}
 
@@ -253,8 +289,21 @@ def collect_and_store(start_date=None):
             continue
             
         obs_temp = vars['temperature']['value']
-        obs_wind = vars['wind_speed']['value']
-        obs_precip = vars.get('precipitation_1h', {}).get('value', 0.0)
+        obs_wind_speed = vars['wind_speed']['value']
+        obs_wind_dir = vars.get('wind_direction', {}).get('value')
+        
+        # Calculate U/V components if direction is available
+        obs_u10 = None
+        obs_v10 = None
+        if obs_wind_speed is not None and obs_wind_dir is not None:
+            # Meteorological to Oceanographic/Mathematical conversion
+            rad = np.radians(obs_wind_dir)
+            obs_u10 = -obs_wind_speed * np.sin(rad)
+            obs_v10 = -obs_wind_speed * np.cos(rad)
+            
+        obs_pressure = vars.get('sea_level_pressure', {}).get('value')
+        obs_precip_1h = vars.get('precipitation_1h', {}).get('value', 0.0)
+        obs_precip_6h = vars.get('precipitation_6h', {}).get('value', 0.0)
         
         # Get GFS Forecast
         gfs_data = get_gfs_forecast_for_time(ts_utc)
@@ -262,11 +311,16 @@ def collect_and_store(start_date=None):
         if gfs_data:
             gfs_vals = gfs_data['values']
             c.execute('''
-                INSERT INTO training_data VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO training_data (
+                    timestamp, 
+                    obs_temp, obs_u10, obs_v10, obs_pressure, obs_precip_1h, obs_precip_6h,
+                    gfs_temp, gfs_u10, gfs_v10, gfs_pressure, gfs_tp_accum,
+                    gfs_run_date, gfs_fhr
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
                 ts_str,
-                obs_temp, obs_wind, obs_precip,
-                gfs_vals['temp'], gfs_vals['wind'], gfs_vals['precip'],
+                obs_temp, obs_u10, obs_v10, obs_pressure, obs_precip_1h, obs_precip_6h,
+                gfs_vals['temp'], gfs_vals['u10'], gfs_vals['v10'], gfs_vals['pressure'], gfs_vals['tp_accum'],
                 gfs_data['run'], gfs_data['fhr']
             ))
             new_count += 1
