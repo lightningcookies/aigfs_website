@@ -17,6 +17,9 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ml_data.db")
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DATA_DIR = os.path.join(BASE_DIR, "data")
+EXAMPLE_FILE = os.path.join(BASE_DIR, "aigfs_example.grib2")
 
 # Alta/Collins Coordinates (Approximate for AIGFS extraction)
 ALTA_LAT = 40.57  # Collins is around here
@@ -147,37 +150,31 @@ def get_aigfs_forecast_for_time(target_time_utc):
     Finds the most recent AIGFS run and forecast hour that covers the target time.
     Returns dictionary of AIGFS values or None.
     """
-    # 1. Check for the example file in the root directory first (useful for testing/backfilling)
-    # This helps verify the pipeline works even without fresh downloads.
-    example_file = "aigfs_example.grib2"
-    if os.path.exists(example_file):
+    # 1. Check for the example file in the root directory first
+    if os.path.exists(EXAMPLE_FILE):
         try:
-            # We check the valid time of the example file
-            ds = xr.open_dataset(example_file, engine='cfgrib')
+            ds = xr.open_dataset(EXAMPLE_FILE, engine='cfgrib')
             valid_time = ds.valid_time.values
             ds.close()
 
-            # Convert numpy datetime64 to python datetime (naive UTC)
             if isinstance(valid_time, np.datetime64):
                 vt_dt = datetime.utcfromtimestamp(valid_time.astype('O') / 1e9)
             else:
                 vt_dt = valid_time
             
-            # If target_time is within 45 mins of the valid_time, use it!
             if abs((target_time_utc - vt_dt).total_seconds()) < 2700:
-                logger.info(f"MATCH: Using example file {example_file} for valid time {vt_dt}")
-                return extract_from_grib(example_file, "example_run", 324) 
+                logger.info(f"MATCH: Using example file {EXAMPLE_FILE} for valid time {vt_dt}")
+                return extract_from_grib(EXAMPLE_FILE, "example_run", 324) 
         except Exception as e:
             logger.debug(f"Example file check skipped: {e}")
 
-    data_dir = "data"
-    if not os.path.exists(data_dir):
-        logger.debug(f"Data directory {data_dir} not found. Ensure scraper.py is running.")
+    if not os.path.exists(DATA_DIR):
+        logger.debug(f"Data directory {DATA_DIR} not found.")
         return None
 
     # Scan all available runs
     runs = []
-    for d in os.listdir(data_dir):
+    for d in os.listdir(DATA_DIR):
         if '_' in d:
             try:
                 dt_str, hr_str = d.split('_')
@@ -192,22 +189,17 @@ def get_aigfs_forecast_for_time(target_time_utc):
             continue
             
         diff_hours = (target_time_utc - run_dt).total_seconds() / 3600
-        # AIGFS files are every 6 hours (000, 006, 012...)
-        # We find the closest available fhr that is a multiple of 6
         fhr = int(6 * round(diff_hours / 6))
         
-        # Ensure the observation is within 3 hours of this forecast step
         if abs(diff_hours - fhr) > 3.0:
             continue
             
         fname = f"aigfs.t{run_dt.strftime('%H')}z.sfc.f{fhr:03d}.grib2"
-        fpath = os.path.join(data_dir, run_dir_name, fname)
+        fpath = os.path.join(DATA_DIR, run_dir_name, fname)
         
         if os.path.exists(fpath):
             logger.info(f"MATCH: Found {fpath} for observation at {target_time_utc}")
             return extract_from_grib(fpath, run_dir_name, fhr)
-        else:
-            logger.debug(f"File {fname} not found in {run_dir_name}")
             
     return None
 
