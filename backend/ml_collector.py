@@ -83,6 +83,18 @@ def init_db():
             logger.info(f"Adding column {col_name} to training_data")
             c.execute(f"ALTER TABLE training_data ADD COLUMN {col_name} {col_type}")
     
+    # Table for trained model coefficients
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS model_coefficients (
+            variable TEXT PRIMARY KEY,
+            slope REAL,
+            intercept REAL,
+            rmse REAL,
+            last_updated TEXT,
+            sample_count INTEGER
+        )
+    ''')
+    
     conn.commit()
     conn.close()
 
