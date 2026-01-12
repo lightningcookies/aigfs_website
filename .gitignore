@@ -4,6 +4,7 @@ venv/
 __pycache__/
 *.idx
 *.grib2
+*.db
 .vscode/
 aigfs_example.grib2
 aigfs_example.grib2.5b7b6.idx
