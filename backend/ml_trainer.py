@@ -11,6 +11,14 @@ logger = logging.getLogger(__name__)
 
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ml_data.db")
 
+def save_model(cursor, var_name, model, rmse, count):
+    timestamp = datetime.now().isoformat()
+    cursor.execute('''
+        INSERT OR REPLACE INTO model_coefficients 
+        (variable, slope, intercept, rmse, last_updated, sample_count)
+        VALUES (?, ?, ?, ?, ?, ?)
+    ''', (var_name, float(model.coef_[0]), float(model.intercept_), float(rmse), timestamp, count))
+
 def train_models():
     if not os.path.exists(DB_PATH):
         logger.warning("Database not found. Skipping training.")
@@ -19,77 +27,65 @@ def train_models():
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     
-    # Fetch Data
-    # Format: obs_temp, gfs_temp, obs_wind, gfs_wind
-    c.execute("SELECT obs_temp, gfs_temp, obs_wind, gfs_wind FROM training_data WHERE obs_temp IS NOT NULL AND gfs_temp IS NOT NULL")
-    rows = c.fetchall()
-    
-    if len(rows) < 10:
-        logger.warning(f"Not enough data to train (only {len(rows)} samples). Need at least 10.")
+    # Check if table exists
+    c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='model_coefficients'")
+    if not c.fetchone():
+        logger.warning("model_coefficients table not found. Ensure ml_collector.py has run at least once.")
         conn.close()
         return
-        
-    data = np.array(rows)
-    obs_temp = data[:, 0]
-    gfs_temp = data[:, 1]
-    obs_wind = data[:, 2]
-    gfs_wind = data[:, 3]
-    
-    # Train Temperature Model
-    # We want to predict Bias (Obs - GFS) based on GFS? 
-    # Or just predict Obs from GFS? 
-    # Let's predict Corrected Value (Obs) from GFS.
-    # Model: Obs = m * GFS + b
-    
-    # Temperature
-    X_temp = gfs_temp.reshape(-1, 1)
-    y_temp = obs_temp
-    
-    model_t = LinearRegression()
-    model_t.fit(X_temp, y_temp)
-    
-    pred_t = model_t.predict(X_temp)
-    rmse_t = np.sqrt(mean_squared_error(y_temp, pred_t))
-    
-    # Wind
-    # Filter NaNs if any (though SQL query handled main nulls, sometimes wind is null differently)
-    # Simple check
-    valid_wind = ~np.isnan(obs_wind) & ~np.isnan(gfs_wind)
-    if np.sum(valid_wind) > 10:
-        X_wind = gfs_wind[valid_wind].reshape(-1, 1)
-        y_wind = obs_wind[valid_wind]
-        
-        model_w = LinearRegression()
-        model_w.fit(X_wind, y_wind)
-        
-        pred_w = model_w.predict(X_wind)
-        rmse_w = np.sqrt(mean_squared_error(y_wind, pred_w))
-    else:
-        model_w = None
-        rmse_w = 0.0
 
-    # Save Results
-    timestamp = datetime.now().isoformat()
-    
-    # Save Temp
-    c.execute('''
-        INSERT OR REPLACE INTO model_coefficients 
-        (variable, slope, intercept, rmse, last_updated, sample_count)
-        VALUES (?, ?, ?, ?, ?, ?)
-    ''', ('temperature', float(model_t.coef_[0]), float(model_t.intercept_), float(rmse_t), timestamp, len(y_temp)))
-    
-    # Save Wind
-    if model_w:
-        c.execute('''
-            INSERT OR REPLACE INTO model_coefficients 
-            (variable, slope, intercept, rmse, last_updated, sample_count)
-            VALUES (?, ?, ?, ?, ?, ?)
-        ''', ('wind_speed', float(model_w.coef_[0]), float(model_w.intercept_), float(rmse_w), timestamp, np.sum(valid_wind)))
-    
+    # 1. Temperature Model
+    c.execute("SELECT obs_temp, gfs_temp FROM training_data WHERE obs_temp IS NOT NULL AND gfs_temp IS NOT NULL")
+    rows = c.fetchall()
+    if len(rows) >= 10:
+        data = np.array(rows)
+        X = data[:, 1].reshape(-1, 1) # AIGFS
+        y = data[:, 0]               # OBS
+        model = LinearRegression().fit(X, y)
+        rmse = np.sqrt(mean_squared_error(y, model.predict(X)))
+        save_model(c, 'temperature', model, rmse, len(y))
+        logger.info(f"Updated Temperature model (RMSE: {rmse:.2f}C from {len(y)} samples)")
+    else:
+        logger.warning(f"Not enough temperature data ({len(rows)} samples)")
+
+    # 2. Wind U-component
+    c.execute("SELECT obs_u10, gfs_u10 FROM training_data WHERE obs_u10 IS NOT NULL AND gfs_u10 IS NOT NULL")
+    rows = c.fetchall()
+    if len(rows) >= 10:
+        data = np.array(rows)
+        X = data[:, 1].reshape(-1, 1)
+        y = data[:, 0]
+        model = LinearRegression().fit(X, y)
+        rmse = np.sqrt(mean_squared_error(y, model.predict(X)))
+        save_model(c, 'u10', model, rmse, len(y))
+        logger.info(f"Updated Wind U model (RMSE: {rmse:.2f}m/s from {len(y)} samples)")
+
+    # 3. Wind V-component
+    c.execute("SELECT obs_v10, gfs_v10 FROM training_data WHERE obs_v10 IS NOT NULL AND gfs_v10 IS NOT NULL")
+    rows = c.fetchall()
+    if len(rows) >= 10:
+        data = np.array(rows)
+        X = data[:, 1].reshape(-1, 1)
+        y = data[:, 0]
+        model = LinearRegression().fit(X, y)
+        rmse = np.sqrt(mean_squared_error(y, model.predict(X)))
+        save_model(c, 'v10', model, rmse, len(y))
+        logger.info(f"Updated Wind V model (RMSE: {rmse:.2f}m/s from {len(y)} samples)")
+
+    # 4. Pressure Model
+    c.execute("SELECT obs_pressure, gfs_pressure FROM training_data WHERE obs_pressure IS NOT NULL AND gfs_pressure IS NOT NULL")
+    rows = c.fetchall()
+    if len(rows) >= 10:
+        data = np.array(rows)
+        X = data[:, 1].reshape(-1, 1)
+        y = data[:, 0]
+        model = LinearRegression().fit(X, y)
+        rmse = np.sqrt(mean_squared_error(y, model.predict(X)))
+        save_model(c, 'pressure', model, rmse, len(y))
+        logger.info(f"Updated Pressure model (RMSE: {rmse:.2f}Pa from {len(y)} samples)")
+
     conn.commit()
     conn.close()
-    
-    logger.info(f"Training Complete. Temp RMSE: {rmse_t:.2f}C, Wind RMSE: {rmse_w:.2f}m/s")
 
 if __name__ == "__main__":
     train_models()
