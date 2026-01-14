@@ -107,12 +107,13 @@ def process_file(file_path):
         
         def load_var(filter_keys, internal_name):
             try:
-                index_path = f"{file_path}.{internal_name}.{os.getpid()}.idx"
+                # Use a stable index path instead of a PID-based one that gets deleted
+                index_path = f"{file_path}.idx"
                 ds = xr.open_dataset(file_path, engine='cfgrib', 
+                                    cache=False,
                                     backend_kwargs={'filter_by_keys': filter_keys, 'indexpath': index_path})
                 if not ds.data_vars:
                     ds.close()
-                    if os.path.exists(index_path): os.remove(index_path)
                     return
 
                 var = list(ds.data_vars)[0]
@@ -121,7 +122,6 @@ def process_file(file_path):
                 val = val.assign_coords(longitude=(((val.longitude + 180) % 360) - 180)).sortby(['latitude', 'longitude'])
                 data_cache[internal_name] = val
                 ds.close()
-                if os.path.exists(index_path): os.remove(index_path)
             except Exception as e:
                 pass
 

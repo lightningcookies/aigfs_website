@@ -206,13 +206,18 @@ def extract_grib_point(args):
         
         valid_time = utc_to_tz(date_str, run_hour, timezone) + timedelta(hours=fhr)
         
-        return {
+        res = {
             'fhr': fhr,
             'time': valid_time.isoformat(),
             't2m': round(t2m_f, 1),
             'wind': round(wind_mph, 1),
             'tp_val': tp_in # Raw value, accumulated later
         }
+        
+        # Cleanup local references
+        del ds_t2m, ds_wind, ds_tp
+        
+        return res
     except Exception as e:
         return None
 
@@ -295,6 +300,11 @@ def get_point_data():
             
         if final_data:
             result['runs'].append({'name': run_label, 'data': final_data})
+        
+        # AGGRESSIVE CLEANUP: Clear references and force collection after each run
+        del run_points
+        del tasks
+        gc.collect()
 
     return jsonify(result)
 
