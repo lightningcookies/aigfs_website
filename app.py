@@ -143,7 +143,9 @@ def get_value():
 
     ds = None
     try:
-        ds = xr.open_dataset(file_path, engine='cfgrib', backend_kwargs={'filter_by_keys': VAR_FILTERS[var]})
+        ds = xr.open_dataset(file_path, engine='cfgrib', 
+                            cache=False,
+                            backend_kwargs={'filter_by_keys': VAR_FILTERS[var]})
         actual_var = list(ds.data_vars)[0]
         value = ds[actual_var].sel(latitude=lat, longitude=lon, method='nearest').values
         final_value = UNIT_CONV[var](value)
@@ -179,19 +181,21 @@ def extract_grib_point(args):
     fpath, lat, lon, fhr, date_str, run_hour, timezone = args
     try:
         # T2m
-        ds_t2m = xr.open_dataset(fpath, engine='cfgrib', backend_kwargs={'filter_by_keys': VAR_FILTERS['t2m']})
+        ds_t2m = xr.open_dataset(fpath, engine='cfgrib', cache=False,
+                                backend_kwargs={'filter_by_keys': VAR_FILTERS['t2m']})
         t2m = float(ds_t2m['t2m'].sel(latitude=lat, longitude=lon, method='nearest').values)
         ds_t2m.close()
         
         # Wind
-        ds_wind = xr.open_dataset(fpath, engine='cfgrib', 
+        ds_wind = xr.open_dataset(fpath, engine='cfgrib', cache=False,
             backend_kwargs={'filter_by_keys': {'typeOfLevel': 'heightAboveGround', 'level': 10}})
         u10 = float(ds_wind['u10'].sel(latitude=lat, longitude=lon, method='nearest').values)
         v10 = float(ds_wind['v10'].sel(latitude=lat, longitude=lon, method='nearest').values)
         ds_wind.close()
         
         # TP
-        ds_tp = xr.open_dataset(fpath, engine='cfgrib', backend_kwargs={'filter_by_keys': VAR_FILTERS['tp']})
+        ds_tp = xr.open_dataset(fpath, engine='cfgrib', cache=False,
+                                backend_kwargs={'filter_by_keys': VAR_FILTERS['tp']})
         tp = float(ds_tp['tp'].sel(latitude=lat, longitude=lon, method='nearest').values)
         ds_tp.close()
         
@@ -264,9 +268,9 @@ def get_point_data():
                     tasks.append((os.path.join(run_path, f), lat, lon, fhr, date_str, run_hour, timezone))
                 except: pass
         
-        # Execute parallel reads
+        # Execute parallel reads - Reduced workers to save RAM and prevent swap spikes
         run_points = []
-        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
             results = executor.map(extract_grib_point, tasks)
             
             for res in results:
@@ -353,12 +357,14 @@ def get_alta_ml_forecast():
         
         try:
             # T2m
-            ds = xr.open_dataset(fpath, engine='cfgrib', backend_kwargs={'filter_by_keys': VAR_FILTERS['t2m']})
+            ds = xr.open_dataset(fpath, engine='cfgrib', cache=False,
+                                backend_kwargs={'filter_by_keys': VAR_FILTERS['t2m']})
             t2m_k = float(ds['t2m'].sel(latitude=lat, longitude=lon, method='nearest').values)
             ds.close()
             
             # Wind
-            ds = xr.open_dataset(fpath, engine='cfgrib', backend_kwargs={'filter_by_keys': {'typeOfLevel': 'heightAboveGround', 'level': 10}})
+            ds = xr.open_dataset(fpath, engine='cfgrib', cache=False,
+                                backend_kwargs={'filter_by_keys': {'typeOfLevel': 'heightAboveGround', 'level': 10}})
             u = float(ds['u10'].sel(latitude=lat, longitude=lon, method='nearest').values)
             v = float(ds['v10'].sel(latitude=lat, longitude=lon, method='nearest').values)
             ds.close()

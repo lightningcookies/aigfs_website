@@ -110,7 +110,8 @@ def extract_from_grib(fpath, run_name, fhr):
 
         # T2m (2m Temperature)
         try:
-            ds = xr.open_dataset(fpath, engine='cfgrib', backend_kwargs={'filter_by_keys': {'typeOfLevel': 'heightAboveGround', 'level': 2}})
+            ds = xr.open_dataset(fpath, engine='cfgrib', cache=False,
+                                backend_kwargs={'filter_by_keys': {'typeOfLevel': 'heightAboveGround', 'level': 2}})
             val = ds['t2m'].sel(latitude=ALTA_LAT, longitude=grib_lon, method='nearest').values
             values['temp'] = float(val) - 273.15 # K to C
             ds.close()
@@ -120,7 +121,8 @@ def extract_from_grib(fpath, run_name, fhr):
         
         # Wind (10m U/V)
         try:
-            ds = xr.open_dataset(fpath, engine='cfgrib', backend_kwargs={'filter_by_keys': {'typeOfLevel': 'heightAboveGround', 'level': 10}})
+            ds = xr.open_dataset(fpath, engine='cfgrib', cache=False,
+                                backend_kwargs={'filter_by_keys': {'typeOfLevel': 'heightAboveGround', 'level': 10}})
             u = ds['u10'].sel(latitude=ALTA_LAT, longitude=grib_lon, method='nearest').values
             v = ds['v10'].sel(latitude=ALTA_LAT, longitude=grib_lon, method='nearest').values
             values['u10'] = float(u)
@@ -133,7 +135,8 @@ def extract_from_grib(fpath, run_name, fhr):
 
         # Pressure (Mean Sea Level)
         try:
-            ds = xr.open_dataset(fpath, engine='cfgrib', backend_kwargs={'filter_by_keys': {'typeOfLevel': 'meanSea'}})
+            ds = xr.open_dataset(fpath, engine='cfgrib', cache=False,
+                                backend_kwargs={'filter_by_keys': {'typeOfLevel': 'meanSea'}})
             val = ds['prmsl'].sel(latitude=ALTA_LAT, longitude=grib_lon, method='nearest').values
             values['pressure'] = float(val) # Pa
             ds.close()
@@ -143,7 +146,8 @@ def extract_from_grib(fpath, run_name, fhr):
 
         # Precip (Total Precipitation - Accumulated)
         try:
-            ds = xr.open_dataset(fpath, engine='cfgrib', backend_kwargs={'filter_by_keys': {'shortName': 'tp'}})
+            ds = xr.open_dataset(fpath, engine='cfgrib', cache=False,
+                                backend_kwargs={'filter_by_keys': {'shortName': 'tp'}})
             val = ds['tp'].sel(latitude=ALTA_LAT, longitude=grib_lon, method='nearest').values
             values['tp_accum'] = float(val) # mm
             ds.close()
@@ -165,7 +169,7 @@ def get_aigfs_forecast_for_time(target_time_utc):
     # 1. Check for the example file in the root directory first
     if os.path.exists(EXAMPLE_FILE):
         try:
-            ds = xr.open_dataset(EXAMPLE_FILE, engine='cfgrib')
+            ds = xr.open_dataset(EXAMPLE_FILE, engine='cfgrib', cache=False)
             valid_time = ds.valid_time.values
             ds.close()
 
