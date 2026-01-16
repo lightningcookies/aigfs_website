@@ -68,49 +68,54 @@ def index():
         if f.endswith('.png') and not f.startswith('legend_'):
             parts = f.replace('.png', '').split('_')
             if len(parts) == 6:
-                region, date, run, fhr, var = parts[1], parts[2], parts[3], parts[4], parts[5]
+                region, utc_date, utc_run, fhr, var = parts[1], parts[2], parts[3], parts[4], parts[5]
                 
-                if date not in catalog:
-                    # Use 12Z (05 AM MST) as the reference for the date label
-                    # This ensures the label matches the calendar day for the morning runs
-                    mst_dt = utc_to_mst(date, "12") 
-                    catalog[date] = {'label': mst_dt.strftime("%b %d, %Y"), 'runs': {}}
+                # Convert run time to MST for grouping
+                mst_dt = utc_to_mst(utc_date, utc_run)
+                mst_date_key = mst_dt.strftime("%Y%m%d")
                 
-                if run not in catalog[date]['runs']:
-                    mst_run_dt = utc_to_mst(date, run)
+                if mst_date_key not in catalog:
+                    catalog[mst_date_key] = {
+                        'label': mst_dt.strftime("%b %d, %Y"), 
+                        'runs': {}
+                    }
+                
+                # Unique ID for the run (combine utc date and run)
+                run_id = f"{utc_date}_{utc_run}"
+                
+                if run_id not in catalog[mst_date_key]['runs']:
                     # Calculate UTC epoch for frontend calc
                     try:
-                        utc_dt_obj = datetime.strptime(f"{date}{run}", "%Y%m%d%H")
+                        utc_dt_obj = datetime.strptime(f"{utc_date}{utc_run}", "%Y%m%d%H")
                         utc_dt_obj = pytz.utc.localize(utc_dt_obj)
                         epoch = utc_dt_obj.timestamp()
                     except:
                         epoch = 0
                     
-                    catalog[date]['runs'][run] = {
-                        'label': mst_run_dt.strftime("%a %I %p MST"), 
+                    catalog[mst_date_key]['runs'][run_id] = {
+                        'label': mst_dt.strftime("%a %I %p MST"), 
                         'epoch': epoch,
+                        'utc_date': utc_date,
+                        'utc_run': utc_run,
                         'fhrs': set(), 'regions': set(), 'vars': set()
                     }
                 
-                catalog[date]['runs'][run]['fhrs'].add(fhr)
-                catalog[date]['runs'][run]['regions'].add(region)
-                catalog[date]['runs'][run]['vars'].add(var)
+                catalog[mst_date_key]['runs'][run_id]['fhrs'].add(fhr)
+                catalog[mst_date_key]['runs'][run_id]['regions'].add(region)
+                catalog[mst_date_key]['runs'][run_id]['vars'].add(var)
 
     if not catalog:
         return "No map images found."
 
-    # Sort dates descending
+    # Sort dates descending (MST dates)
     sorted_dates = sorted(catalog.keys(), reverse=True)
     
     # Get initial values for first load
     latest_date = sorted_dates[0]
-    # Sort runs chronologically by actual MST time
-    def run_sort_key(r):
-        dt = utc_to_mst(latest_date, r)
-        return dt.timestamp()
-        
-    available_runs = sorted(catalog[latest_date]['runs'].keys(), key=run_sort_key)
-    latest_run = available_runs[0]
+    
+    # Sort runs chronologically (run_id contains date_run which sorts correctly)
+    available_runs = sorted(catalog[latest_date]['runs'].keys())
+    latest_run = available_runs[-1] # Newest run is last in list because of YYYYMMDD_HH format
     
     # Convert sets to sorted lists for JSON
     for d in catalog:

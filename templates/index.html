@@ -162,11 +162,15 @@
         const REGION_VIEWS = { 'global': { center: [20, 0], zoom: 3 }, 'conus': { center: [39, -98], zoom: 4 }, 'west': { center: [40, -114], zoom: 5 } };
 
         function updateMap(regionChanged = false) {
-            const date = document.getElementById('date-select').value;
-            const run = document.getElementById('run-select').value;
+            const mstDateKey = document.getElementById('date-select').value;
+            const runKey = document.getElementById('run-select').value;
             const region = document.getElementById('region-select').value;
             const varName = document.getElementById('var-select').value;
             const fhr = document.getElementById('fhr-select').value;
+            
+            const runData = catalog[mstDateKey].runs[runKey];
+            const date = runData.utc_date;
+            const run = runData.utc_run;
             
             if (regionChanged && REGION_VIEWS[region]) map.flyTo(REGION_VIEWS[region].center, REGION_VIEWS[region].zoom);
 
@@ -187,7 +191,6 @@
                 document.getElementById('loader').style.display = 'none';
                 
                 // Calculate valid time
-                const runData = catalog[date].runs[run];
                 const baseEpoch = runData.epoch;
                 const fhrHours = parseInt(fhr);
                 const validEpoch = baseEpoch + (fhrHours * 3600);
@@ -218,8 +221,11 @@
         map.on('click', function(e) {
             const lat = e.latlng.lat.toFixed(4);
             const lon = e.latlng.lng.toFixed(4);
-            const date = document.getElementById('date-select').value;
-            const run = document.getElementById('run-select').value;
+            const mstDateKey = document.getElementById('date-select').value;
+            const runKey = document.getElementById('run-select').value;
+            const runData = catalog[mstDateKey].runs[runKey];
+            const date = runData.utc_date;
+            const run = runData.utc_run;
             const varName = document.getElementById('var-select').value;
             const fhr = document.getElementById('fhr-select').value;
 
