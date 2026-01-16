@@ -71,7 +71,9 @@ def index():
                 region, date, run, fhr, var = parts[1], parts[2], parts[3], parts[4], parts[5]
                 
                 if date not in catalog:
-                    mst_dt = utc_to_mst(date, "00") # Use 00 as base for date label
+                    # Use 12Z (05 AM MST) as the reference for the date label
+                    # This ensures the label matches the calendar day for the morning runs
+                    mst_dt = utc_to_mst(date, "12") 
                     catalog[date] = {'label': mst_dt.strftime("%b %d, %Y"), 'runs': {}}
                 
                 if run not in catalog[date]['runs']:
@@ -85,7 +87,7 @@ def index():
                         epoch = 0
                     
                     catalog[date]['runs'][run] = {
-                        'label': mst_run_dt.strftime("%I %p MST"), 
+                        'label': mst_run_dt.strftime("%a %I %p MST"), 
                         'epoch': epoch,
                         'fhrs': set(), 'regions': set(), 'vars': set()
                     }

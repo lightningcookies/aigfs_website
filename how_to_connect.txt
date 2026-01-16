@@ -1,0 +1,3 @@
+ssh lenovo1@10.0.0.201
+password: lenovo1
+directory: cd Documents/aigfs/aigfs_website
