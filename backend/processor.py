@@ -107,11 +107,11 @@ def process_file(file_path):
         
         def load_var(filter_keys, internal_name):
             try:
-                # Use a stable index path instead of a PID-based one that gets deleted
-                index_path = f"{file_path}.idx"
+                # Disable on-disk indexing to prevent "Ignoring index file" errors and log spam
+                # This forces in-memory indexing which is safer when files might be updated
                 ds = xr.open_dataset(file_path, engine='cfgrib', 
                                     cache=False,
-                                    backend_kwargs={'filter_by_keys': filter_keys, 'indexpath': index_path})
+                                    backend_kwargs={'filter_by_keys': filter_keys, 'indexpath': ''})
                 if not ds.data_vars:
                     ds.close()
                     return

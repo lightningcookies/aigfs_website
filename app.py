@@ -152,7 +152,7 @@ def get_value():
     try:
         ds = xr.open_dataset(file_path, engine='cfgrib', 
                             cache=False,
-                            backend_kwargs={'filter_by_keys': VAR_FILTERS[var]})
+                            backend_kwargs={'filter_by_keys': VAR_FILTERS[var], 'indexpath': ''})
         actual_var = list(ds.data_vars)[0]
         value = ds[actual_var].sel(latitude=lat, longitude=lon, method='nearest').values
         final_value = UNIT_CONV[var](value)
@@ -189,20 +189,20 @@ def extract_grib_point(args):
     try:
         # T2m
         ds_t2m = xr.open_dataset(fpath, engine='cfgrib', cache=False,
-                                backend_kwargs={'filter_by_keys': VAR_FILTERS['t2m']})
+                                backend_kwargs={'filter_by_keys': VAR_FILTERS['t2m'], 'indexpath': ''})
         t2m = float(ds_t2m['t2m'].sel(latitude=lat, longitude=lon, method='nearest').values)
         ds_t2m.close()
         
         # Wind
         ds_wind = xr.open_dataset(fpath, engine='cfgrib', cache=False,
-            backend_kwargs={'filter_by_keys': {'typeOfLevel': 'heightAboveGround', 'level': 10}})
+            backend_kwargs={'filter_by_keys': {'typeOfLevel': 'heightAboveGround', 'level': 10}, 'indexpath': ''})
         u10 = float(ds_wind['u10'].sel(latitude=lat, longitude=lon, method='nearest').values)
         v10 = float(ds_wind['v10'].sel(latitude=lat, longitude=lon, method='nearest').values)
         ds_wind.close()
         
         # TP
         ds_tp = xr.open_dataset(fpath, engine='cfgrib', cache=False,
-                                backend_kwargs={'filter_by_keys': VAR_FILTERS['tp']})
+                                backend_kwargs={'filter_by_keys': VAR_FILTERS['tp'], 'indexpath': ''})
         tp = float(ds_tp['tp'].sel(latitude=lat, longitude=lon, method='nearest').values)
         ds_tp.close()
         
@@ -375,13 +375,13 @@ def get_alta_ml_forecast():
         try:
             # T2m
             ds = xr.open_dataset(fpath, engine='cfgrib', cache=False,
-                                backend_kwargs={'filter_by_keys': VAR_FILTERS['t2m']})
+                                backend_kwargs={'filter_by_keys': VAR_FILTERS['t2m'], 'indexpath': ''})
             t2m_k = float(ds['t2m'].sel(latitude=lat, longitude=lon, method='nearest').values)
             ds.close()
             
             # Wind
             ds = xr.open_dataset(fpath, engine='cfgrib', cache=False,
-                                backend_kwargs={'filter_by_keys': {'typeOfLevel': 'heightAboveGround', 'level': 10}})
+                                backend_kwargs={'filter_by_keys': {'typeOfLevel': 'heightAboveGround', 'level': 10}, 'indexpath': ''})
             u = float(ds['u10'].sel(latitude=lat, longitude=lon, method='nearest').values)
             v = float(ds['v10'].sel(latitude=lat, longitude=lon, method='nearest').values)
             ds.close()
