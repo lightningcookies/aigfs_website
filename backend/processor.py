@@ -15,7 +15,7 @@ from datetime import datetime
 # Processing settings
 CLEANUP_GRIB = False
 REPROCESS = False     
-MAX_WORKERS = 1  # SERIAL PROCESSING ONLY to save RAM
+MAX_WORKERS = max(1, cpu_count() - 1)  # Use all but one core
 MIN_FREE_RAM_GB = 0.5 
 
 # Region Definitions (Strict Lat/Lon Boxes)
