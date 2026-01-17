@@ -112,7 +112,7 @@ def process_file(file_path):
              # print(f"Skipping {basename} - All maps already exist") 
              return True
 
-        print(f"Processing {basename}...")
+        print(f"Processing {basename} (Date: {date_str}, Run: {run}Z)...")
         
         # 1. Load Data
         data_cache = {}
