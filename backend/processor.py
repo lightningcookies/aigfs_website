@@ -141,10 +141,10 @@ def process_file(file_path):
                 data_cache[internal_name] = val
                 ds.close()
             except Exception as e:
-                if "End of resource" in str(e) or "truncated" in str(e).lower():
-                    bad_file = True
-                    raise e # Re-raise to trigger the outer exception handler
-                pass
+                # Catch ANY exception from cfgrib/xarray during load
+                # The goal is to aggressively identify bad files
+                bad_file = True
+                raise e 
 
         try:
             load_var(VAR_CONFIG['t2m']['filter'], 't2m')
@@ -265,13 +265,16 @@ def process_file(file_path):
         return True
 
     except Exception as e:
-        print(f"Error processing {file_path}: {e}")
-        # If the file is corrupted or truncated (End of resource), delete it so it can be re-downloaded
-        if "End of resource" in str(e) or "truncated" in str(e).lower():
-             try:
-                 print(f"Deleting corrupted file: {file_path}")
-                 os.remove(file_path)
-             except: pass
+        # print(f"Error processing {file_path}: {e}") # Reduce noise
+        
+        # Aggressive cleanup: If ANY error occurred during GRIB loading, assume file is bad
+        # This is safe because scraper will re-download it.
+        # We catch everything now because 'skipping corrupted Message' often doesn't raise a clean Exception object string
+        try:
+             print(f"Deleting potentially corrupted file: {file_path} (Error: {str(e)[:100]})")
+             os.remove(file_path)
+        except: pass
+        
         return False
 
 def generate_legends(output_dir):
