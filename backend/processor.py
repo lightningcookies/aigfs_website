@@ -127,12 +127,15 @@ def process_file(file_path):
             try:
                 # Disable on-disk indexing to prevent "Ignoring index file" errors and log spam
                 # This forces in-memory indexing which is safer when files might be updated
+                # errors='raise' forces cfgrib to throw an exception on corruption instead of just logging "skipping..."
                 ds = xr.open_dataset(file_path, engine='cfgrib', 
                                     cache=False,
-                                    backend_kwargs={'filter_by_keys': filter_keys, 'indexpath': ''})
+                                    backend_kwargs={'filter_by_keys': filter_keys, 'indexpath': '', 'errors': 'raise'})
+                
                 if not ds.data_vars:
+                    # If no variables found, the file is effectively empty/useless/corrupt for this filter
                     ds.close()
-                    return
+                    raise ValueError("No data variables found in GRIB file (possible corruption or empty)")
 
                 var = list(ds.data_vars)[0]
                 val = ds[var]
