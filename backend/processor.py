@@ -140,9 +140,11 @@ def process_file(file_path):
                 val = val.assign_coords(longitude=(((val.longitude + 180) % 360) - 180)).sortby(['latitude', 'longitude'])
                 data_cache[internal_name] = val
                 ds.close()
-            except Exception as e:
-                # Catch ANY exception from cfgrib/xarray during load
-                # The goal is to aggressively identify bad files
+            except BaseException as e:
+                # Catch ANY exception from cfgrib/xarray during load (including BaseException for library errors)
+                if isinstance(e, (KeyboardInterrupt, SystemExit)):
+                    raise e
+                
                 bad_file = True
                 raise e 
 
@@ -152,8 +154,9 @@ def process_file(file_path):
             load_var(VAR_CONFIG['prmsl']['filter'], 'prmsl')
             load_var({'typeOfLevel': 'heightAboveGround', 'level': 10, 'shortName': 'u10'}, 'u10')
             load_var({'typeOfLevel': 'heightAboveGround', 'level': 10, 'shortName': 'v10'}, 'v10')
-        except Exception as e:
+        except BaseException as e:
              # If bad_file was flagged, re-raise to hit the delete logic
+             if isinstance(e, (KeyboardInterrupt, SystemExit)): raise e
              if bad_file: raise e
 
         if 'u10' in data_cache and 'v10' in data_cache:
@@ -264,14 +267,14 @@ def process_file(file_path):
             print(f"Processed {basename}: Generated {generated_count} maps")
         return True
 
-    except Exception as e:
-        # print(f"Error processing {file_path}: {e}") # Reduce noise
-        
+    except BaseException as e:
+        if isinstance(e, (KeyboardInterrupt, SystemExit)):
+            raise e
+            
         # Aggressive cleanup: If ANY error occurred during GRIB loading, assume file is bad
         # This is safe because scraper will re-download it.
-        # We catch everything now because 'skipping corrupted Message' often doesn't raise a clean Exception object string
         try:
-             print(f"Deleting potentially corrupted file: {file_path} (Error: {str(e)[:100]})")
+             print(f"Deleting potentially corrupted file: {file_path} (Error: {str(e)[:200]})")
              os.remove(file_path)
         except: pass
         
