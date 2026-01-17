@@ -259,6 +259,12 @@ def process_file(file_path):
 
     except Exception as e:
         print(f"Error processing {file_path}: {e}")
+        # If the file is corrupted or truncated (End of resource), delete it so it can be re-downloaded
+        if "End of resource" in str(e) or "truncated" in str(e).lower():
+             try:
+                 print(f"Deleting corrupted file: {file_path}")
+                 os.remove(file_path)
+             except: pass
         return False
 
 def generate_legends(output_dir):
