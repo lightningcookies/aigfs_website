@@ -86,7 +86,24 @@ def process_file(file_path):
         date_str = os.path.basename(os.path.dirname(file_path)).split('_')[0]
         output_dir = os.path.join("static", "maps")
         
-        # Determine needed tasks
+        # Check if ALL output files already exist to skip unnecessary work
+        # This is the "caching" check.
+        all_exist = True
+        for reg_name, reg_cfg in REGIONS.items():
+            if fhr_int > reg_cfg['max_fhr']: continue
+            for var_key in VAR_CONFIG.keys():
+                out_filename = f"aigfs_{reg_name}_{date_str}_{run}_{fhr_str}_{var_key}.png"
+                out_path = os.path.join(output_dir, out_filename)
+                if REPROCESS or not os.path.exists(out_path):
+                    all_exist = False
+                    break
+            if not all_exist: break
+        
+        if all_exist:
+             # print(f"Skipping {basename} - All maps already exist") # Uncomment for verbose logging
+             return True
+
+        # Determine needed tasks (Double check inside the loop logic if needed, but redundant with above optimization)
         tasks_needed = False
         for reg_name, reg_cfg in REGIONS.items():
             if fhr_int > reg_cfg['max_fhr']: continue
@@ -98,6 +115,7 @@ def process_file(file_path):
                     break
         
         if not tasks_needed:
+            # print(f"Skipping {basename} - All maps exist") 
             return True
 
         print(f"Processing {basename}...")
