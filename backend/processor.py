@@ -86,44 +86,44 @@ def process_file(file_path):
         date_str = os.path.basename(os.path.dirname(file_path)).split('_')[0]
         output_dir = os.path.join("static", "maps")
         
-        # Check if ALL output files already exist to skip unnecessary work
-        # This is the "caching" check.
-        all_exist = True
-        for reg_name, reg_cfg in REGIONS.items():
-            if fhr_int > reg_cfg['max_fhr']: continue
-            for var_key in VAR_CONFIG.keys():
-                out_filename = f"aigfs_{reg_name}_{date_str}_{run}_{fhr_str}_{var_key}.png"
-                out_path = os.path.join(output_dir, out_filename)
-                if REPROCESS or not os.path.exists(out_path):
-                    all_exist = False
-                    break
-            if not all_exist: break
-        
-        if all_exist:
-             # print(f"Skipping {basename} - All maps already exist") # Uncomment for verbose logging
-             return True
-
-        # Determine needed tasks (Double check inside the loop logic if needed, but redundant with above optimization)
+        # Determine needed tasks
         tasks_needed = False
         for reg_name, reg_cfg in REGIONS.items():
             if fhr_int > reg_cfg['max_fhr']: continue
             for var_key in VAR_CONFIG.keys():
                 out_filename = f"aigfs_{reg_name}_{date_str}_{run}_{fhr_str}_{var_key}.png"
                 out_path = os.path.join(output_dir, out_filename)
+                
+                # IMPORTANT: If file doesn't exist, we need to process.
                 if REPROCESS or not os.path.exists(out_path):
                     tasks_needed = True
                     break
+                
+                # EXTRA CHECK: If file exists but is empty (0 bytes), it's corrupted -> reprocessing needed
+                if os.path.exists(out_path) and os.path.getsize(out_path) == 0:
+                    try: os.remove(out_path)
+                    except: pass
+                    tasks_needed = True
+                    break
+            
+            if tasks_needed: break
         
         if not tasks_needed:
-            # print(f"Skipping {basename} - All maps exist") 
-            return True
+             # print(f"Skipping {basename} - All maps already exist") 
+             return True
 
         print(f"Processing {basename}...")
         
         # 1. Load Data
         data_cache = {}
         
+        # Track bad file attempts
+        bad_file = False
+
         def load_var(filter_keys, internal_name):
+            nonlocal bad_file
+            if bad_file: return 
+
             try:
                 # Disable on-disk indexing to prevent "Ignoring index file" errors and log spam
                 # This forces in-memory indexing which is safer when files might be updated
@@ -141,13 +141,20 @@ def process_file(file_path):
                 data_cache[internal_name] = val
                 ds.close()
             except Exception as e:
+                if "End of resource" in str(e) or "truncated" in str(e).lower():
+                    bad_file = True
+                    raise e # Re-raise to trigger the outer exception handler
                 pass
 
-        load_var(VAR_CONFIG['t2m']['filter'], 't2m')
-        load_var(VAR_CONFIG['tp']['filter'], 'tp')
-        load_var(VAR_CONFIG['prmsl']['filter'], 'prmsl')
-        load_var({'typeOfLevel': 'heightAboveGround', 'level': 10, 'shortName': 'u10'}, 'u10')
-        load_var({'typeOfLevel': 'heightAboveGround', 'level': 10, 'shortName': 'v10'}, 'v10')
+        try:
+            load_var(VAR_CONFIG['t2m']['filter'], 't2m')
+            load_var(VAR_CONFIG['tp']['filter'], 'tp')
+            load_var(VAR_CONFIG['prmsl']['filter'], 'prmsl')
+            load_var({'typeOfLevel': 'heightAboveGround', 'level': 10, 'shortName': 'u10'}, 'u10')
+            load_var({'typeOfLevel': 'heightAboveGround', 'level': 10, 'shortName': 'v10'}, 'v10')
+        except Exception as e:
+             # If bad_file was flagged, re-raise to hit the delete logic
+             if bad_file: raise e
 
         if 'u10' in data_cache and 'v10' in data_cache:
             data_cache['wind_speed'] = np.sqrt(data_cache['u10']**2 + data_cache['v10']**2)
